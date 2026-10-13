@@ -42,7 +42,7 @@ python -m philo_rag.cli serve
 # 浏览器打开 http://127.0.0.1:8000
 ```
 
-默认使用项目内自带的 `models/bge-small-zh-v1.5`（中文语义向量，约 95 MB）与  
+默认使用项目内自带的 `models/bge-base-zh-v1.5`（中文语义向量，768 维，约 390 MB）与  
 `data/哲学大纲_规范化_全集.txt`（已清洗语料），**离线即可运行**。
 
 > 首次 `build` 需要给 6000 多个知识块做向量化，CPU 上约 3–6 分钟，之后查询是毫秒级。
@@ -131,7 +131,7 @@ chunk:                        # 3. 分块
 
 embedding:                    # 4. 向量化
   backend: sentence_transformer   # sentence_transformer | hashing | api
-  model: models/bge-small-zh-v1.5
+  model: models/bge-base-zh-v1.5
   device: cpu
 
 retrieval:                    # 5. 检索
@@ -142,7 +142,8 @@ retrieval:                    # 5. 检索
   definition_boost: 0.02
   final_top_k: 8
   expand_query: true
-  rerank: false
+  rerank: true
+  rerank_model: models/bge-reranker-v2-m3
 
 answer:                       # 6. 生成（问答固定全文检索，不接受筛选条件）
   backend: template           # template | ollama | api
@@ -217,20 +218,46 @@ answer:
 
 ## 七、换更强的嵌入模型（可选）
 
-默认的 `bge-small-zh-v1.5`（512 维）已经能支撑语义检索。要再上一档：
+默认的 `bge-base-zh-v1.5`（768 维）已经够用。追求极致效果可再上 `bge-large-zh-v1.5`（1024 维）
+或 `bge-m3`（1024 维、8192 长文本），下载与配置方式相同：
 
 ```bash
-HF_ENDPOINT=https://hf-mirror.com python -c "
+python -c "
 from huggingface_hub import snapshot_download
-snapshot_download('BAAI/bge-base-zh-v1.5', local_dir='models/bge-base-zh-v1.5')"
+snapshot_download('BAAI/bge-large-zh-v1.5', local_dir='models/bge-large-zh-v1.5')"
 ```
+
+> 直连 huggingface.co 不通时，可先 `export HF_ENDPOINT=https://hf-mirror.com` 走镜像；
+> 若镜像报「Distant resource does not seem to be on huggingface.co」，说明本地
+> huggingface_hub 版本与镜像的 HEAD 元数据不兼容，改回直连或升级/降级 huggingface_hub。
 
 ```yaml
 embedding:
-  model: models/bge-base-zh-v1.5    # 768 维，效果更好、速度约慢 3 倍
+  model: models/bge-large-zh-v1.5   # 1024 维，效果更强、更慢
 ```
 
-换模型后**必须全量重建索引**（向量空间变了）。
+换模型后**必须全量重建索引**（向量空间变了）；检索层会校验模型维度与索引是否一致，
+不一致时给出明确报错而不是静默算错。
+
+### 7.1 cross-encoder 重排
+
+默认已开启（`retrieval.rerank: true`），使用本地 `models/bge-reranker-v2-m3`。
+离线部署必须先下载该模型，否则会自动退回融合结果：
+
+```bash
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('BAAI/bge-reranker-v2-m3', local_dir='models/bge-reranker-v2-m3')"
+```
+
+```yaml
+retrieval:
+  rerank: true
+  rerank_model: models/bge-reranker-v2-m3    # 本地路径；有网环境也可填 BAAI/bge-reranker-v2-m3
+```
+
+重排会提升排序精度、增加约 50~200 ms 延迟；重排实例只加载一次并缓存，
+模型目录缺失时只告警一次并退回融合结果，不会反复触发联网下载。想关掉改 `rerank: false` 即可。
 
 ---
 
@@ -339,7 +366,9 @@ philo-rag/
 ├── docs/使用说明.md             分步操作与故障排查
 ├── data/                       语料（prepare 的产物）
 ├── lexicon/                    词典（理论家 / 概念 / 体系目录）
-├── models/bge-small-zh-v1.5/   自带的嵌入模型（离线可用）
+├── models/                     离线模型（随项目分发）
+│   ├── bge-base-zh-v1.5/       嵌入模型（768 维）
+│   └── bge-reranker-v2-m3/     重排模型（可选，retrieval.rerank 开启时用）
 ├── store/                      索引产物（chunks / vectors / terms / manifest）
 ├── outputs/                    检索与问答的导出结果
 ├── scripts/
@@ -427,7 +456,8 @@ python scripts/check_gate.py --relevance # 追加语义相关性用例（40 条�
 ## 十三、常见问题
 
 **Q：没有 GPU 能跑吗？**  
-能。默认 `device: cpu`，bge-small 建索引约 3–6 分钟（6600 余块），之后查询毫秒级。
+能。默认 `device: cpu`，bge-base 建索引约 20 分钟（6600 余块）；重排开启时首次查询
+要额外加载一次重排模型，之后查询仍为秒级。
 
 **Q：完全离线可以吗？**  
 可以。模型与语料都已随项目落地，`backend: sentence_transformer` + 本地路径即可。  

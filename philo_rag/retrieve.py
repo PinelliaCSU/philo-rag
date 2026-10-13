@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -180,6 +181,14 @@ def hybrid_search(
             expanded = query + " " + " ".join(extra)
 
     embedder = get_embedder(cfg["embedding"], cfg.get("_root"))
+
+    # 嵌入模型维度必须与索引一致：换模型后忘重建索引，向量点积会静默算错，
+    # 这里提前给出可读错误而不是让 matmul 抛晦涩异常。
+    if embedder.dim and store.vectors is not None and embedder.dim != store.vectors.shape[1]:
+        raise RuntimeError(
+            f"嵌入模型与索引维度不一致：模型 {embedder.dim}D，索引 {store.vectors.shape[1]}D。"
+            f"更换 embedding.model 后请先运行 `python -m philo_rag.cli build` 重建索引。"
+        )
     qvec = embedder.encode([expanded])[0]
 
     dense = _dense_rank(store, qvec)
@@ -243,25 +252,77 @@ def hybrid_search(
     results = _dedupe(results)
 
     if r_cfg.get("rerank"):
-        results = _rerank(results, query, r_cfg.get("rerank_model", ""))
+        results = _rerank(results, query, cfg)
 
     return results[: (top_k or int(r_cfg["final_top_k"]))]
 
 
-def _rerank(results: list[dict[str, Any]], query: str, model: str) -> list[dict[str, Any]]:
-    """交叉编码器重排（可选）。模型缺失时静默退回融合结果。"""
+# --------------------------------------------------------------------------- #
+# 重排器（交叉编码器，可选）：本地路径解析 + 实例缓存 + 离线护栏
+# --------------------------------------------------------------------------- #
+_RERANK_CACHE: dict[tuple[str, str], Any] = {}
+
+
+def _resolve_model_path(model: str, root: str | Path | None) -> str:
+    """把模型名解析为本地路径（与嵌入层一致）。
+
+    `rerank_model` 推荐写成 `models/bge-reranker-v2-m3` 这类随项目分发的相对路径；
+    相对路径相对项目根（`cfg["_root"]`）解析。绝对路径或远程 repo id 原样返回，
+    供有网环境直接按 HuggingFace 名称加载。
+    """
+    if not root or not model:
+        return model
+    p = Path(model)
+    if not p.is_absolute() and (Path(root) / p).exists():
+        return str(Path(root) / p)
+    return model
+
+
+def _load_reranker(cfg: dict[str, Any]) -> Any | None:
+    """按配置加载交叉编码器，带实例缓存与离线护栏。
+
+    - 只加载一次，之后复用（CrossEncoder 冷启动较贵，服务化场景每查重建会拖慢响应）；
+    - 模型目录不存在时直接判不可用并**负面缓存**，绝不触发联网下载——离线部署下
+      下载会挂起或抛网络异常，且每次查询反复尝试会雪上加霜；
+    - 加载失败同样退回 None（由调用方回到融合结果），只告警不中断链路。
+    """
+    r_cfg = cfg.get("retrieval", {}) or {}
+    model = str(r_cfg.get("rerank_model", "models/bge-reranker-v2-m3"))
+    resolved = _resolve_model_path(model, cfg.get("_root"))
+    key = ("reranker", resolved)
+    if key in _RERANK_CACHE:
+        return _RERANK_CACHE[key]  # 可能是 None（负面缓存）
+
+    if not Path(resolved).exists():
+        print(f"[warn] 重排模型不可用（{resolved} 不存在），已退回融合结果。"
+              f"下载后放入该目录，或改 retrieval.rerank_model。")
+        _RERANK_CACHE[key] = None
+        return None
+
     try:
         from sentence_transformers import CrossEncoder
 
-        ce = CrossEncoder(model)
-        pairs = [(query, r["chunk"].text) for r in results]
-        scores = ce.predict(pairs)
-        for r, s in zip(results, scores):
-            r["rerank_score"] = float(s)
-        return sorted(results, key=lambda r: -r["rerank_score"])
+        ce = CrossEncoder(resolved)
+        _RERANK_CACHE[key] = ce
+        return ce
     except Exception as exc:  # noqa: BLE001
-        print(f"[warn] 重排不可用，已退回 RRF 结果：{exc}")
+        print(f"[warn] 重排器加载失败，已退回融合结果：{exc}")
+        _RERANK_CACHE[key] = None
+        return None
+
+
+def _rerank(results: list[dict[str, Any]], query: str, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """交叉编码器重排（可选）。模型不可用时静默退回融合结果。"""
+    ce = _load_reranker(cfg)
+    if ce is None:
         return results
+    pairs = [(query, r["chunk"].text) for r in results]
+    scores = ce.predict(pairs)
+    if not isinstance(scores, (list, np.ndarray)):
+        scores = [scores]
+    for r, s in zip(results, scores):
+        r["rerank_score"] = float(s)
+    return sorted(results, key=lambda r: -r["rerank_score"])
 
 
 # --------------------------------------------------------------------------- #

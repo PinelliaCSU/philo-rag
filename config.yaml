@@ -37,7 +37,7 @@ chunk:
 embedding:
   # sentence_transformer（本地语义向量，推荐）| hashing（离线词法近似）| api（云端）
   backend: sentence_transformer
-  model: models/bge-small-zh-v1.5   # 中文语义模型；升级可换 BAAI/bge-base-zh-v1.5
+  model: models/bge-base-zh-v1.5   # 中文语义模型（768 维）；已从 bge-small-zh-v1.5 升级
   dim: 512                          # 仅 hashing 后端使用
   batch_size: 64
   device: cpu                       # cpu | cuda
@@ -56,8 +56,9 @@ retrieval:
   definition_boost: 0.02    # 问「什么是 X」时，块内出现 X 定义句式的加分
   final_top_k: 8            # 最终返回条数
   expand_query: true        # 用词典做查询扩展（术语 → 别名 / 外文名）
-  rerank: false             # true 需 sentence-transformers 的 CrossEncoder
-  rerank_model: BAAI/bge-reranker-v2-m3
+  rerank: true              # true 需 sentence-transformers 的 CrossEncoder 与本地重排模型
+  rerank_model: models/bge-reranker-v2-m3   # 本地重排模型路径（相对项目根）；离线部署用
+                                            # 有网环境也可填 HF 名 BAAI/bge-reranker-v2-m3
 
 # ---------- 6. 生成 ----------
 answer:
@@ -85,9 +86,9 @@ gate:
   strict: false             # true 时「无词典/体系锚点」的问题一律拦截（更严，易误杀）
   hint: ""                  # 跳过时给出的改写建议；留空使用内置默认文案
   relevance: true           # 语义相关性格挡：硬编码模式覆盖不到的垃圾问题按「与语料相似度」兜底
-  relevance_threshold: 0.50 # 查询与语料的最高余弦相似度低于此值（且无锚点）即跳过；
-                            # 按 bge-small-zh 语义后端标定，换嵌入模型需重新标定；
-                            # hashing 后端此闸门自动放行，建议直接设 relevance: false
+  relevance_threshold: 0.48 # 查询与语料的最高余弦相似度低于此值（且无锚点）即跳过；
+                            # 按 bge-base-zh-v1.5 标定（相关 min≈0.55 / 垃圾 max≈0.44）；
+                            # 换嵌入模型需重新标定；hashing 后端此闸门自动放行
 
 # ---------- 7. 结果输出 ----------
 output:

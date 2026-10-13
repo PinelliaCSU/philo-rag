@@ -241,13 +241,13 @@ def check_relevance(
     单元编号/哲学域词）说明它已经指向本书内容，一律放行，避免误杀词典里
     相似度偏低的人名等短词。
 
-    判定只用最高相似度一个量：bge-small 这类语义模型对无关中文句子的相似度
-    通常 < 0.5，而对真正相关的提问通常 > 0.6，中间留有余量；阈值由配置
-    `gate.relevance_threshold` 控制（按嵌入后端标定，换模型需重新标定）。
+    判定只用最高相似度一个量：语义向量模型对无关中文句子的相似度通常明显低于
+    真正相关的提问，中间留有余量（bge-base 实测垃圾 max≈0.44、相关 min≈0.55）；
+    阈值由配置 `gate.relevance_threshold` 控制（按嵌入后端标定，换模型需重新标定）。
     """
     gate_cfg = (cfg or {}).get("gate", {}) if cfg else {}
     hint = str(gate_cfg.get("hint", "") or DEFAULT_HINT)
-    threshold = float(gate_cfg.get("relevance_threshold", 0.50))
+    threshold = float(gate_cfg.get("relevance_threshold", 0.48))
     q = normalize(question)
 
     # 语义阈值只对语义向量后端标定；hashing 是词法近似、分布不同，直接放行。
