@@ -29,6 +29,7 @@
   too_short   归一化后短于阈值，未构成可检索的提问
   off_topic   实时信息或通用任务（天气 / 股票 / 翻译 / 写代码 …）
   no_anchor   既无知识库锚点、又无实词（strict 档下凡无锚点即拦）
+  irrelevant  无锚点且与语料语义相似度过低（语义相关性格挡，兜底硬编码覆盖不到的情况）
 
 放行判据（任一命中即放行）
 --------------------------
@@ -143,6 +144,7 @@ SKIP_MESSAGES: dict[str, str] = {
     "fragment": "缺少上下文的碎片追问，没有可检索的主题。",
     "off_topic": "该问题涉及实时信息或通用任务，超出本知识库范围。",
     "no_anchor": "问题中没有识别到知识库的概念、理论家或单元锚点。",
+    "irrelevant": "问题与《哲学大纲》语料没有可检出的关联，无法据此检索回答。",
 }
 DEFAULT_HINT = "请换一个与《哲学大纲》内容相关的问题，例如「什么是字头？」「大他者怎么理解？」"
 
@@ -153,6 +155,7 @@ def _verdict(
     category: str,
     reason: str,
     hint: str = "",
+    anchor: bool | None = None,
 ) -> dict[str, Any]:
     return {
         "question": question,
@@ -160,6 +163,7 @@ def _verdict(
         "category": category,
         "reason": reason,
         "hint": hint if not ok else "",
+        "anchor": anchor,
     }
 
 
@@ -175,6 +179,7 @@ def check_question(
         category  pass / disabled / too_short / social / meta / fragment / off_topic / no_anchor
         reason    人类可读的裁决理由
         hint      跳过时给出的改写建议
+        anchor    True 表示命中词典 / 单元编号 / 哲学域词（供语义相关性格挡判断是否兜底）
     """
     gate_cfg = (cfg or {}).get("gate", {}) if cfg else {}
     q = normalize(question)
@@ -191,19 +196,19 @@ def check_question(
     # 顺序即优先级：先匹配语义明确的封闭模式，再回落到长度兜底，
     # 这样「你好」被记为 social 而不是笼统的 too_short，裁决理由才对得上。
     if RE_SOCIAL.match(q):
-        return _verdict(q, False, "social", SKIP_MESSAGES["social"], hint)
+        return _verdict(q, False, "social", SKIP_MESSAGES["social"], hint, anchor=has_anchor)
     if RE_META.search(q):
-        return _verdict(q, False, "meta", SKIP_MESSAGES["meta"], hint)
+        return _verdict(q, False, "meta", SKIP_MESSAGES["meta"], hint, anchor=has_anchor)
     if RE_FRAGMENT.match(q):
-        return _verdict(q, False, "fragment", SKIP_MESSAGES["fragment"], hint)
+        return _verdict(q, False, "fragment", SKIP_MESSAGES["fragment"], hint, anchor=has_anchor)
     if len(q) < min_chars:
         # 短句只有在「既无锚点、又无实质内容」时才算退化输入。
         # 「字头」「3-2」这类短术语本身带锚点，应当放行；「什么是」这种只有问句词的才拦。
         residual = RE_ASK.sub("", q).strip(" ?？。！!，,、：:；;…~～")
         if not has_anchor and len(residual) < 2:
-            return _verdict(q, False, "too_short", SKIP_MESSAGES["too_short"], hint)
+            return _verdict(q, False, "too_short", SKIP_MESSAGES["too_short"], hint, anchor=has_anchor)
     if RE_OFFTOPIC.search(q) and not has_anchor:
-        return _verdict(q, False, "off_topic", SKIP_MESSAGES["off_topic"], hint)
+        return _verdict(q, False, "off_topic", SKIP_MESSAGES["off_topic"], hint, anchor=has_anchor)
 
     # ---- 锚点判定 ----
     # 非 strict 档下不因「词典没收录」而拦截：哲学域是开放的，词典只有 105 个概念，
@@ -212,12 +217,65 @@ def check_question(
     # 想强制要求锚点，把 gate.strict 打开即可。
     if not has_anchor:
         if strict and len(q) >= min_chars:
-            return _verdict(q, False, "no_anchor", SKIP_MESSAGES["no_anchor"], hint)
+            return _verdict(q, False, "no_anchor", SKIP_MESSAGES["no_anchor"], hint, anchor=has_anchor)
         residual = RE_ASK.sub("", q).strip(" ?？。！!，,、：:；;…~～")
         if len(residual) < 2:
-            return _verdict(q, False, "no_anchor", SKIP_MESSAGES["no_anchor"], hint)
+            return _verdict(q, False, "no_anchor", SKIP_MESSAGES["no_anchor"], hint, anchor=has_anchor)
 
-    return _verdict(q, True, "pass", "通过闸门，进入检索")
+    return _verdict(q, True, "pass", "通过闸门，进入检索", anchor=has_anchor)
+
+
+def check_relevance(
+    store: Any,
+    question: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """语义相关性兜底：问题与语料相似度过低时直接跳过（`irrelevant`）。
+
+    硬编码的拦截模式（social / meta / off_topic …）覆盖不了所有垃圾输入——
+    总会有「红烧肉怎么做」「阿巴阿巴」这类不在任何语料里的问题。它们与整部语料的
+    语义距离天然很远，因此用「查询向量到全部块的最高余弦相似度」做阈值判定，
+    就能把这类问题在检索之前挡掉，而不是对每个问题都硬跑一遍检索。
+
+    只在 `check_question` 之后、且问题**没有锚点**时调用：有锚点（词典概念/理论家/
+    单元编号/哲学域词）说明它已经指向本书内容，一律放行，避免误杀词典里
+    相似度偏低的人名等短词。
+
+    判定只用最高相似度一个量：bge-small 这类语义模型对无关中文句子的相似度
+    通常 < 0.5，而对真正相关的提问通常 > 0.6，中间留有余量；阈值由配置
+    `gate.relevance_threshold` 控制（按嵌入后端标定，换模型需重新标定）。
+    """
+    gate_cfg = (cfg or {}).get("gate", {}) if cfg else {}
+    hint = str(gate_cfg.get("hint", "") or DEFAULT_HINT)
+    threshold = float(gate_cfg.get("relevance_threshold", 0.50))
+    q = normalize(question)
+
+    # 语义阈值只对语义向量后端标定；hashing 是词法近似、分布不同，直接放行。
+    embedding_cfg = (cfg or {}).get("embedding", {}) or {}
+    if (
+        store is None
+        or getattr(store, "vectors", None) is None
+        or embedding_cfg.get("backend", "sentence_transformer") == "hashing"
+    ):
+        return _verdict(q, True, "pass", "语义相关性格挡未启用（非语义向量后端）")
+
+    from .embed import get_embedder
+
+    embedder = get_embedder(cfg["embedding"], cfg.get("_root"))
+    qvec = embedder.encode([q])[0]
+    sims = store.vectors @ qvec
+    dense_max = float(sims.max()) if sims.size else 0.0
+
+    if dense_max >= threshold:
+        return _verdict(q, True, "pass", f"与语料最高相似度 {dense_max:.3f}，通过相关性格挡")
+
+    return _verdict(
+        q,
+        False,
+        "irrelevant",
+        f"{SKIP_MESSAGES['irrelevant']}（最高相似度 {dense_max:.3f}）",
+        hint,
+    )
 
 
 def skip_answer(gate: dict[str, Any]) -> str:

@@ -77,12 +77,17 @@ answer:
 # ---------- 6b. 问题闸门（检索前置过滤）----------
 # 溯源问答的最前端关卡：不适合检索的问题在此直接跳过，不进入检索与生成。
 # 拦截类别：social 寒暄 / meta 系统询问 / fragment 碎片追问 / too_short 过短 /
-#           off_topic 实时信息与通用任务 / no_anchor 无锚点又无实词
+#           off_topic 实时信息与通用任务 / no_anchor 无锚点又无实词 /
+#           irrelevant 语义相关性兜底（与语料相似度过低的无锚点问题）
 gate:
   enabled: true             # false 则所有问题都进入检索（等价于 CLI 的 --no-gate）
   min_chars: 4              # 归一化后短于此长度、且无锚点无实词时判为退化输入
   strict: false             # true 时「无词典/体系锚点」的问题一律拦截（更严，易误杀）
   hint: ""                  # 跳过时给出的改写建议；留空使用内置默认文案
+  relevance: true           # 语义相关性格挡：硬编码模式覆盖不到的垃圾问题按「与语料相似度」兜底
+  relevance_threshold: 0.50 # 查询与语料的最高余弦相似度低于此值（且无锚点）即跳过；
+                            # 按 bge-small-zh 语义后端标定，换嵌入模型需重新标定；
+                            # hashing 后端此闸门自动放行，建议直接设 relevance: false
 
 # ---------- 7. 结果输出 ----------
 output:

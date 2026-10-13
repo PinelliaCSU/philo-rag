@@ -12,6 +12,8 @@
     问题 ─▶ ① 问题闸门 gate.check_question
               │ 不通过 → 直接返回 skipped，不触发任何检索
               ▼ 通过
+            ①b 语义相关性格挡 gate.check_relevance（无锚点且与语料相似度过低 → skipped）
+              ▼ 通过
             ② 全文混合检索 hybrid_search（**不施加任何元数据筛选**）
               ▼
             ③ 证据筛选 / 上下文组装 ─▶ 生成 ─▶ answer + citations[]
@@ -28,7 +30,7 @@ import re
 import urllib.request
 from typing import Any
 
-from .gate import check_question, skip_answer
+from .gate import check_question, check_relevance, skip_answer
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import _definition_terms, hybrid_search
@@ -272,6 +274,23 @@ def answer(
             "answer": skip_answer(gate),
             "citations": [],
         }
+
+    # ---- ①b 语义相关性格挡：无锚点、又和语料相似度过低的问题也直接跳过 ----
+    # 硬编码拦截模式（寒暄 / 实时信息 …）覆盖不了所有垃圾输入，这一层用
+    # 「查询与全语料的最高余弦相似度」做兜底：与本书无关的问题在此终止，
+    # 不需要跑检索，也不产生噪声结果。
+    gate_cfg = cfg.get("gate", {}) if cfg else {}
+    if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
+        rel_gate = check_relevance(store, question, cfg)
+        if not rel_gate["ok"]:
+            return {
+                "question": question,
+                "backend": "gate",
+                "skipped": True,
+                "gate": rel_gate,
+                "answer": skip_answer(rel_gate),
+                "citations": [],
+            }
 
     backend = cfg["answer"].get("backend", "template")
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
