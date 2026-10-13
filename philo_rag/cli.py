@@ -1,8 +1,8 @@
 """命令行入口。
 
     prepare  采集清洗语料        build   构建索引
-    ask      引用溯源问答        term    术语索引与语义检索
-    facets   分面统计与体系浏览
+    ask      引用溯源问答        theme   专题提炼（主题综合）
+    term     术语索引与语义检索  facets  分面统计与体系浏览
     eval     检索质量评测        stats   索引概览
     serve    Web 服务            demo    一键自检
 """
@@ -144,6 +144,15 @@ def cmd_ask(cfg: dict, args: argparse.Namespace) -> None:
     _emit("answer", res, args, cfg)
 
 
+def cmd_theme(cfg: dict, args: argparse.Namespace) -> None:
+    """专题提炼：主题聚合检索 + 结构化生成（与点式问答互补的另一条链路）。"""
+    from .answer import theme_answer
+
+    store, lex = open_store(cfg)
+    res = theme_answer(store, lex, args.topic, cfg)
+    _emit("theme", res, args, cfg)
+
+
 def cmd_term(cfg: dict, args: argparse.Namespace) -> None:
     store, lex = open_store(cfg)
     res = term_lookup(store, lex, args.term, cfg, top_k=args.limit)
@@ -207,6 +216,17 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
             print(f"  {card['name']}（{card['philosopher']}，{card['lifespan']}）：{card['definition']}")
         print(f"  精确命中 {res['exact_total']} 块")
 
+    from .answer import theme_answer
+
+    for topic in ["马克思", "精神分析"]:
+        _rule(f"专题提炼：{topic}")
+        res = theme_answer(store, lex, topic, cfg)
+        c = res["theme"]["counts"]
+        print(f"  直接命中 {c['direct']} 块（占语料 {c['direct']/c['corpus']:.1%}）"
+              f"，{c['unit_total']} 个单元，锚点 {res['theme']['anchors']}")
+        top = res["theme"]["units"][:3]
+        print("  核心单元：" + "　".join(f"{u['code']} {u['title']}（{u['hits']}块）" for u in top))
+
     _rule("自检通过")
 
 
@@ -232,6 +252,11 @@ def main(argv: list[str] | None = None) -> None:
                        help="关闭问题闸门，强制所有问题进入检索（调试用）")
     _add_common(p_ask)
     p_ask.set_defaults(func=cmd_ask)
+
+    p_theme = sub.add_parser("theme", help="专题提炼（主题聚合检索 + 结构化生成）")
+    p_theme.add_argument("topic", help="主题词，如「马克思」「黑格尔」「精神分析」")
+    _add_common(p_theme)
+    p_theme.set_defaults(func=cmd_theme)
 
     p_term = sub.add_parser("term", help="术语索引与语义检索")
     p_term.add_argument("term")

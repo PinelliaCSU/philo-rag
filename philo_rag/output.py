@@ -92,6 +92,25 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
 
 
 # --------------------------------------------------------------------------- #
+# 专题提炼
+# --------------------------------------------------------------------------- #
+def render_theme_output(res: dict[str, Any], fmt: str,
+                        cfg: dict[str, Any] | None = None) -> str:
+    """专题提炼结果。md/txt 直接输出生成层写好的成篇文档；
+    其余格式输出结构化字段，供下游消费。"""
+    if fmt == "json":
+        return _dump_json(res)
+    if fmt == "jsonl":
+        return json.dumps(res, ensure_ascii=False)
+    if fmt == "csv":
+        return _csv(res["theme"]["units"],
+                    ["code", "title", "volume", "hits", "total", "density"])
+    if fmt == "txt":
+        return res["answer"]
+    return res["answer"] + "\n"
+
+
+# --------------------------------------------------------------------------- #
 # 术语检索
 # --------------------------------------------------------------------------- #
 def render_term(res: dict[str, Any], fmt: str) -> str:
@@ -223,6 +242,7 @@ def render_eval(res: dict[str, Any], fmt: str) -> str:
 
 RENDERERS = {
     "answer": render_answer,
+    "theme": render_theme_output,
     "term": render_term,
     "quote": render_quote,
     "facets": render_facets,
@@ -236,7 +256,7 @@ def render(kind: str, result: dict[str, Any], fmt: str = "md",
     if fmt not in FORMATS:
         raise ValueError(f"不支持的输出格式：{fmt}（可选 {', '.join(FORMATS)}）")
     fn = RENDERERS[kind]
-    return fn(result, fmt, cfg) if kind == "answer" else fn(result, fmt)
+    return fn(result, fmt, cfg) if kind in ("answer", "theme") else fn(result, fmt)
 
 
 def write(kind: str, result: dict[str, Any], cfg: dict[str, Any],

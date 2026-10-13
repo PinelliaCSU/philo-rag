@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import collections
 import json
 import re
 import urllib.request
@@ -348,4 +349,245 @@ def answer(
         "gate": gate,
         "answer": text,
         "citations": citations,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 专题提炼：结构化生成（与上面的点式问答互补）
+# --------------------------------------------------------------------------- #
+# 点式问答的提示词要求「3—5 段、不超过 700 字」——它是为**定位一句出处**设计的。
+# 主题提炼要的是相反的东西：按体系结构铺开、覆盖多个单元、保留长引文。
+# 因此单独一套提示词，长度约束差一个量级。
+THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_title}》撰写一份**主题专题提炼**。
+
+任务：围绕主题「{topic}」，依据下面**已按数值单元聚合好**的资料，写一份结构化的专题提炼——不是回答一个问题，而是给出该主题在全书中完整的思想面貌。
+
+写作要求：
+1. 只使用「资料」中的内容，不引入资料之外的知识；每个论断后用 [单元编号] 或（p页码）标注来源；
+2. **必须按体系结构组织**，而不是按资料出现顺序罗列。固定四节：
+   ① 体系定位——该主题在全书各卷、各数值单元中的分布与位置，最密集处在哪里；
+   ② 核心单元的思想骨架——主题最密集的单元分别讲了什么：核心定义、形成机制、论证路径；
+   ③ 衍生与谱系——与主题并置、由主题派生的其他理论家与单元，说明其关系（上游/同代/后继/反对）；
+   ④ 张力与批判——书中对该主题的保留意见、内部矛盾、未决问题；
+3. 每个核心单元至少给出 2—3 句有实质内容的论述，**不要只摘一句就换下一个单元**；
+4. 保留原文的关键术语与引文（用「」标出），不要改写成通俗解释，也不要合并不同单元的表述；
+5. 用中文，篇幅约 {min_chars}—{max_chars} 字，宁可详实不要空泛。
+
+资料（已按单元聚合；标题行给出单元编号、标题、命中块数）：
+{context}
+
+主题：{topic}
+
+专题提炼："""
+
+
+def _theme_sentences(text: str, terms: list[str], max_chars: int) -> str:
+    """从段落群里挑出与主题最相关的句子，保留原文顺序与完整句。"""
+    sents = _sentences(text) or [text]
+    # 去重：分块重叠与跨段落群的重复会让同一句反复出现
+    seen: set[str] = set()
+    uniq: list[tuple[int, str]] = []
+    for i, s in enumerate(sents):
+        if s in seen:
+            continue
+        seen.add(s)
+        uniq.append((i, s))
+
+    scored: list[tuple[int, int, str]] = []
+    for i, s in uniq:
+        sc = sum(3 for t in terms if t in s)
+        sc += sum(
+            2 for m in ("即", "是指", "意味着", "所谓", "核心", "因为", "因此", "但是", "然而", "不是")
+            if m in s
+        )
+        scored.append((sc, i, s))
+    picked = [x for x in scored if x[0] > 0]
+    picked = sorted(picked, key=lambda x: -x[0])[:8] or sorted(scored, key=lambda x: -len(x[2]))[:3]
+    picked.sort(key=lambda x: x[1])
+    out: list[str] = []
+    used = 0
+    for _, _, s in picked:
+        if used + len(s) > max_chars and out:
+            break
+        out.append(s)
+        used += len(s)
+    return "".join(out) or text[:max_chars]
+
+
+def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """离线（template 后端）专题提炼：按单元分节，每节给主题句群 + 关键引文。
+
+    与点式问答的 `template_answer` 的区别：那里每块只取 1 句、最多 8 句；
+    这里每个核心单元取一整段「主题句群」（约 300 字），并按体系结构分节，
+    产出的是有骨架的短篇专题，而不是 8 条孤立摘录。
+    """
+    t_cfg = cfg.get("theme", {}) or {}
+    per_unit = int(t_cfg.get("answer_chars_per_unit", 340))
+    core_n = int(t_cfg.get("core_units", 6))
+    ext_n = int(t_cfg.get("extended_units", 6))
+    doc_title = "《" + str(cfg.get("doc", {}).get("title", "")) + "》"
+
+    a, n = res["anchors"], res["counts"]
+    terms = [t for t in [res["topic"], *a["philosophers"], *a["concepts"]] if t]
+    units = res["units"]
+    core, ext = units[:core_n], units[core_n : core_n + ext_n]
+
+    lines: list[str] = [f"# 专题提炼：{res['topic']}", ""]
+    ratio = n["direct"] / max(n["corpus"], 1)
+    note = "；主题未登录词典，锚点由种子检索反推" if res["seed_mode"] else ""
+    lines.append(
+        f"> 全书直接命中 **{n['direct']}** 块（元数据 {n['meta']} + 字面 {n['literal']}）"
+        f"，占语料 {ratio:.1%}；分布于 **{n['unit_total']}** 个数值单元，语义补充 {n['extended']} 块{note}。"
+    )
+    lines.append("")
+
+    # ---- 一、体系定位 ----
+    lines.append("## 一、体系定位")
+    if a["philosophers"]:
+        lines.append(f"- 锚定理论家：{'、'.join(a['philosophers'])}")
+    if a["concepts"]:
+        lines.append(f"- 锚定概念：{'、'.join(a['concepts'])}")
+    if a["units"]:
+        lines.append(f"- 锚定单元：{'、'.join(a['units'])}")
+    dist = "、".join(f"`{u['code'] or '前言'}` {u['hits']} 块" for u in units[:8])
+    lines.append(f"- 密度分布（前 8 单元）：{dist}")
+    vols = collections.Counter(u["volume"] for u in units if u["volume"])
+    if vols:
+        lines.append("- 覆盖卷：" + "、".join(f"{v}（{c} 单元）" for v, c in vols.most_common()))
+    lines.append("")
+
+    # ---- 二、核心单元 ----
+    citations: list[dict[str, Any]] = []
+    lines.append(f"## 二、核心单元（按命中密度，前 {len(core)} 个）")
+    for u in core:
+        head = f"### {u['code']} {u['title']}" if u["code"] else f"### {u['title']}"
+        lines.append(head)
+        lines.append(f"*{u['volume'] or '—'}｜命中 {u['hits']}/{u['total']} 块（密度 {u['density']}）*")
+        lines.append("")
+        body = _theme_sentences(u["groups"][0]["text"] if u["groups"] else "", terms, per_unit)
+        lines.append(body)
+        # 该单元内若有引文块，补一条关键引文（专题稿的「金句」来源）。
+        # 优先挑长度适中（10–140 字）且主题词密度高的，避免选出被切碎的残句。
+        qs = [q for g in u["groups"] for q in g["quotes"] if 10 <= len(q) <= 140]
+        if qs:
+            best = max(qs, key=lambda q: sum(1 for t in terms if t in q) * 100 + len(q))
+            lines.append(f"> 「{best}」")
+        g0 = u["groups"][0] if u["groups"] else None
+        if g0:
+            citations.append(
+                {
+                    "n": len(citations) + 1,
+                    "chunk_id": g0["chunk_ids"][0],
+                    "citation": f"{doc_title} · {u['code']} {u['title']} · 第 {g0['page']} 页",
+                    "chapter_path": [u["volume"], f"{u['code']} {u['title']}"],
+                    "unit": u["code"],
+                    "unit_title": u["title"],
+                    "volume": u["volume"],
+                    "start": g0["start"],
+                    "end": g0["end"],
+                    "page": g0["page"],
+                    "chunk_type": "body",
+                    "philosophers": a["philosophers"],
+                    "concepts": a["concepts"],
+                    "eras": [],
+                    "text": g0["text"][:600],
+                    "score": u["density"],
+                }
+            )
+        lines.append("")
+
+    # ---- 三、衍生与谱系 ----
+    if res["lineage"] or ext:
+        lines.append("## 三、衍生与谱系")
+        if res["lineage"]:
+            lin = "、".join(f"{name}（{c}）" for name, c in res["lineage"][:12])
+            lines.append(f"- 共现理论家（次数）：{lin}")
+        if res["eras"]:
+            lines.append("- 年代分布：" + "、".join(f"{e}（{c}）" for e, c in res["eras"]))
+        for u in ext:
+            if u["groups"]:
+                snippet = _theme_sentences(u["groups"][0]["text"], terms, per_unit // 2)
+                lines.append(f"- **{u['code']} {u['title']}**（{u['hits']} 块）：{snippet}")
+        lines.append("")
+
+    # ---- 四、引用来源 ----
+    lines.append("## 四、引用来源")
+    for c in citations:
+        lines.append(f"- **[{c['n']}]** {c['citation']} · 字符 {c['start']}-{c['end']}")
+    lines.append("")
+    lines.append(
+        f"> 本专题由离线抽取式后端生成（`answer.backend=template`），共聚合 {n['direct']} 块证据、"
+        f"上下文 {res['context_chars']} 字。接入本地模型（`backend: ollama`）可获得连贯的成篇论述。"
+    )
+    return "\n".join(lines), citations
+
+
+def theme_answer(
+    store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]
+) -> dict[str, Any]:
+    """专题提炼主链路：主题聚合检索 → 结构化上下文 → 生成 → 附引用。"""
+    from .theme import theme_search
+
+    res = theme_search(store, lex, topic, cfg)
+    backend = cfg["answer"].get("backend", "template")
+    doc_title = store.manifest.get("doc_title", "") or cfg.get("doc", {}).get("title", "")
+
+    if backend == "template":
+        text, citations = render_theme(res, lex, cfg)
+    else:
+        a_cfg = cfg["answer"]
+        prompt = THEME_PROMPT.format(
+            doc_title=doc_title,
+            topic=topic,
+            context=res["context"],
+            min_chars=int(a_cfg.get("theme_min_chars", 1500)),
+            max_chars=int(a_cfg.get("theme_max_chars", 4000)),
+        )
+        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg)
+        text = _clean_generated_answer(text)
+        citations = [
+            {
+                "n": i,
+                "chunk_id": u["groups"][0]["chunk_ids"][0] if u["groups"] else "",
+                "citation": f"{doc_title} · {u['code']} {u['title']}",
+                "unit": u["code"],
+                "unit_title": u["title"],
+                "volume": u["volume"],
+                "page": u["groups"][0]["page"] if u["groups"] else 0,
+                "start": u["groups"][0]["start"] if u["groups"] else 0,
+                "end": u["groups"][0]["end"] if u["groups"] else 0,
+                "chunk_type": "body",
+                "philosophers": res["anchors"]["philosophers"],
+                "concepts": res["anchors"]["concepts"],
+                "eras": [],
+                "text": u["groups"][0]["text"][:600] if u["groups"] else "",
+                "score": u["density"],
+            }
+            for i, u in enumerate(res["units"], start=1)
+        ]
+
+    return {
+        "topic": topic,
+        "kind": "theme",
+        "backend": backend,
+        "answer": text,
+        "citations": citations,
+        "theme": {
+            "seed_mode": res["seed_mode"],
+            "anchors": res["anchors"],
+            "counts": res["counts"],
+            "units": [
+                {
+                    "code": u["code"],
+                    "title": u["title"],
+                    "volume": u["volume"],
+                    "hits": u["hits"],
+                    "total": u["total"],
+                    "density": u["density"],
+                }
+                for u in res["units_all"]
+            ],
+            "lineage": res["lineage"],
+            "eras": res["eras"],
+        },
     }

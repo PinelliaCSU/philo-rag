@@ -12,6 +12,7 @@
     GET  /api/units           体系目录（卷 → 单元）
     GET  /api/concepts        术语卡列表
     POST /api/ask             引用溯源问答
+    GET  /api/theme?topic=    专题提炼（主题聚合检索 + 结构化生成）
     GET  /api/term?term=      术语索引与语义检索
     GET  /api/context?...     取某块及其上下文（用于「跳转原文」）
 
@@ -146,6 +147,14 @@ def create_app(cfg: dict) -> FastAPI:
                 for h in res["semantic_hits"]
             ],
         }
+
+    @app.get("/api/theme")
+    def theme(topic: str = Query(..., min_length=1)) -> dict:
+        """专题提炼：主题聚合检索 + 结构化生成（与点式问答互补的另一条链路）。"""
+        from .answer import theme_answer
+
+        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        return theme_answer(store, lex, topic, cfg)
 
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
@@ -293,6 +302,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <div class="wrap">
   <div class="tabs">
     <div class="tab on" data-t="ask">引用溯源问答</div>
+    <div class="tab" data-t="theme">专题提炼</div>
     <div class="tab" data-t="term">术语检索</div>
     <div class="tab" data-t="facet">分面 / 体系</div>
   </div>
@@ -309,6 +319,20 @@ INDEX_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div id="ask-out"></div>
+  </section>
+
+  <!-- 专题提炼 -->
+  <section id="p-theme" class="hidden">
+    <div class="card">
+      <div class="row">
+        <input type="text" id="th" placeholder="主题词，例如：马克思 / 黑格尔 / 精神分析 / 辩证法 / 拉康">
+        <button id="theme-btn">生成专题</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="muted">专题提炼面向「某主题在全书的面貌」：高召回该主题的全部相关块，按数值单元聚合，再分节组织。与上面的点式问答互补——问答定位一句出处，专题给出整体结构。</span>
+      </div>
+    </div>
+    <div id="theme-out"></div>
   </section>
 
   <!-- 术语 -->
@@ -334,7 +358,7 @@ const esc = s => (s??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['ask','term','facet'].forEach(k =>
+  ['ask','theme','term','facet'].forEach(k =>
     $('#p-'+k).classList.toggle('hidden', k !== t.dataset.t));
 });
 
@@ -383,6 +407,32 @@ $('#ask-btn').onclick = async () => {
   finally{ clearInterval(tick); $('#ask-btn').disabled = false; }
 };
 $('#q').addEventListener('keydown', e => { if(e.key==='Enter') $('#ask-btn').click(); });
+
+// ---------- 专题提炼 ----------
+$('#theme-btn').onclick = async () => {
+  const t = $('#th').value.trim(); if(!t) return;
+  const out = $('#theme-out');
+  const t0 = performance.now();
+  out.innerHTML = '<div class="card muted">聚合检索并生成中…　<b id="th-t">0.0s</b></div>';
+  const tick = setInterval(()=>{
+    const el = $('#th-t'); if(el) el.textContent = ((performance.now()-t0)/1000).toFixed(1)+'s';
+  }, 100);
+  $('#theme-btn').disabled = true;
+  try{
+    const r = await jget('/api/theme?topic=' + encodeURIComponent(t));
+    const c = r.theme.counts;
+    const units = r.theme.units.map(u =>
+      `<span class="unit">${esc(u.code||'前言')}</span> ${esc(u.title)} <span class="muted">${u.hits}块/${u.density}</span>`).join('　');
+    const lin = (r.theme.lineage||[]).map(([n,k])=>`<span class="tag">${esc(n)} ${k}</span>`).join('');
+    out.innerHTML = `<div class="card"><h3>聚合概览</h3>
+        <div class="muted">直接命中 ${c.direct} 块（元数据 ${c.meta} + 字面 ${c.literal}），占语料 ${(c.direct/c.corpus*100).toFixed(1)}%，分布于 ${c.unit_total} 个单元${r.theme.seed_mode?'；主题未登录词典，锚点由种子检索反推':''}</div>
+        <div style="margin-top:8px;line-height:2">${units}</div>
+        <div style="margin-top:8px">${lin}</div></div>`
+      + `<div class="card"><h3>专题正文</h3><pre class="ans">${esc(r.answer)}</pre></div>`;
+  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  finally{ clearInterval(tick); $('#theme-btn').disabled = false; }
+};
+$('#th').addEventListener('keydown', e => { if(e.key==='Enter') $('#theme-btn').click(); });
 
 // ---------- 术语 ----------
 $('#term-btn').onclick = async () => {
