@@ -1,0 +1,426 @@
+# 概念词典 · 为《哲学大纲》语料定制
+# 用途：① 术语索引（精确命中）② 查询扩展（同义词改写）③ 概念卡 ④ 概念—理论家关联
+#
+# 字段说明：
+#   name        标准名（写入 chunk.concepts）
+#   aliases     别名 / 外文名 / 常见异写（正文与查询中出现）
+#   philosopher 该概念的首见者或主要归属者（用于消歧与概念卡）
+#   definition  一句话定义（术语卡直接展示）
+concepts:
+  # ====================== 一、哲学大纲体系自身 ======================
+  - name: 字头
+    aliases: [首位数字, 一字头, 二字头, 三字头, 四字头, 头一个字]
+    definition: 哲学大纲四位编号的首位数字，1 形而下学、2 形而上学、3 观念论、4 实践，决定体系的总体姿态
+  - name: 场域论
+    aliases: [场域, 场论, 场域层]
+    definition: 四位编号的第一位，规定「存在者整体」所处之场如何被设想（融贯的场、有裂隙的场、被结构化的场等）
+  - name: 本体论
+    aliases: [存在论, ontology, 是论, 存有论]
+    philosopher: 亚里士多德
+    definition: 四位编号的第二位，规定存在者整体被如何把握（一元的实体、场与整体之二分、主体的无等）
+  - name: 认识论
+    aliases: [知识论, epistemology, 认识层]
+    definition: 四位编号的第三位，规定知识如何可能、主体以何种方式通达对象（先验、反思、符号等）
+  - name: 目的论
+    aliases: [teleology, 目的层, 合目的性]
+    definition: 四位编号的第四位，规定体系所指向的终极目标或运动方向（无脑循环、上升、解放等）
+  - name: 形而下学
+    aliases: [实在论, Subphysics, Underphysics, Prephysics, realism, 天真实在论]
+    definition: 一字头，尚未拥有自身本体论与自然学的状态；默认存在一个融贯均匀的场，一切皆可被对象化定位
+  - name: 形而上学
+    aliases: [metaphysics, 二字头]
+    definition: 二字头，场与存在者整体之间的张力被意识到；追问「一切之所在」本身是否属于存在者整体
+  - name: 观念论
+    aliases: [idealism, 唯心论, 三字头]
+    definition: 三字头，把主体性把握为符号系统的动力学机制，以「无」为不可被填充的匮乏而非容器
+  - name: 实践
+    aliases: [四字头, practice, 实践哲学]
+    definition: 四字头，坚持总体与总体化之间的差异并随时对哲学姿态保持警惕的辩证唯物主义姿态
+  - name: 存在者整体
+    aliases: [一切, Everything, total, 一切之所在, 整体]
+    definition: 把存在误思为存在者、将其聚拢为一个分类学系统的结果；其与所处之场的关系是形而上学的核心张力
+  - name: 总体化
+    aliases: [总体, totality, totalization, 总体性]
+    definition: 通过一个动力学中心点不断收编剩余、缝合例外的过程；总体即其总体化，故必然产生结构性剩余
+  - name: 四话语
+    aliases: [四种话语, 话语理论, 主人话语, 大学话语, 癔症话语, 分析家话语]
+    philosopher: 拉康
+    definition: 拉康提出的四种社会联结结构：主人话语、大学话语、癔症话语、分析家话语，用以分析意识形态与主体位置
+
+  # ====================== 二、精神分析（3-4 卷主轴）======================
+  - name: 大他者
+    aliases: [the big Other, 大他者A, 大写的他者]
+    philosopher: 拉康
+    definition: 象征秩序本身、符号系统的场所；它保证能指链的连贯，却自身是缺失的、无保证的
+  - name: 客体小a
+    aliases: [小他者, objet petit a, 对象a, 客体a, 小a]
+    philosopher: 拉康
+    definition: 欲望的对象—成因，主体在幻想中用以填补大他者之缺失的剩余，永远无法被真正占有
+  - name: 能指
+    aliases: [signifier, 能指链, 所指, signified]
+    philosopher: 索绪尔
+    definition: 符号的声音形象一面；拉康强调能指先于所指，主体由能指链所决定并为其所切割
+  - name: 符号界
+    aliases: [象征界, 象征秩序, Symbolic, 符号系统, 符号秩序]
+    philosopher: 拉康
+    definition: 由语言与法则构成的第三界，主体在此被赋予位置；它是生产性的、需要动力学机制的场
+  - name: 想象界
+    aliases: [Imaginary, 想象关系, 镜像阶段]
+    philosopher: 拉康
+    definition: 由镜像认同与二元关系构成的界域，自我在此以形象获得统一，同时引入侵凌与误认
+  - name: 实在界
+    aliases: [Real, 实在, 实在界]
+    philosopher: 拉康
+    definition: 抵抗符号化、无法被完全纳入象征秩序的界域；它以创伤与不可能性的形式返回
+  - name: 快感
+    aliases: [jouissance, 原乐, 享乐]
+    philosopher: 拉康
+    definition: 超出快乐原则、带有痛苦性的过度享受；主体围绕它组织症状与幻想
+  - name: 剩余快感
+    aliases: [plus-de-jouir, surplus enjoyment, 多余快感]
+    philosopher: 拉康
+    definition: 总体化机制必然留下、永远达不成的剩余；对应马克思意义上的剩余价值在快感层面的同构物
+  - name: 驱力
+    aliases: [drive, 冲动, 死亡驱力, 死亡本能]
+    philosopher: 弗洛伊德
+    definition: 围绕对象缺失而循环运作的冲动；死亡驱力指向超越快乐原则的重复与消解
+  - name: 幻想
+    aliases: [fantasy, 幻想框架, 幻象]
+    philosopher: 拉康
+    definition: 为主体提供欲望坐标、遮蔽大他者之缺失的剧本；意识形态常以幻想结构运作
+  - name: 症状
+    aliases: [symptom, 症候, 症状性]
+    philosopher: 拉康
+    definition: 主体无意识冲突的编码形式；在齐泽克处被读作社会与意识形态的症候
+  - name: 贱斥
+    aliases: [abjection, 弃绝, 贱斥物]
+    philosopher: 克里斯蒂娃
+    definition: 主体为确立自身边界而排斥的、既非主体亦非客体的污秽之物，构成社会排除机制的底层
+  - name: 原质
+    aliases: [the Thing, das Ding, 物]
+    philosopher: 拉康
+    definition: 被象征秩序排除、却作为不可能之享乐核心而返回的失落之物的位置
+  - name: 力比多
+    aliases: [libido, 欲力]
+    philosopher: 弗洛伊德
+    definition: 精神能量的投注；可被转移、固着或升华，是欲望经济学的基本量
+  - name: 爱欲
+    aliases: [Eros, 爱若斯]
+    philosopher: 弗洛伊德
+    definition: 趋向结合、扩展与创造的精神力量，与死亡驱力相对而并行
+  - name: 超定
+    aliases: [overdetermination, 多重决定, 超决定]
+    philosopher: 阿尔都塞
+    definition: 社会整体的诸矛盾由结构主导并被多重决定；经济「归根到底」起决定作用但非唯一决定
+  - name: 意识形态
+    aliases: [ideology, 意识形态批判]
+    philosopher: 马克思
+    definition: 再生产统治关系的观念与实践系统；阿尔都塞强调其物质性与对主体的质询功能
+  - name: 意识形态国家机器
+    aliases: [ISA, ideological state apparatus, 国家机器]
+    philosopher: 阿尔都塞
+    definition: 通过教育、家庭、宗教、媒体等以「质询」方式生产顺从主体的非暴力性国家装置
+  - name: 主体化
+    aliases: [subjectivation, 主体性化, 质询, interpellation]
+    philosopher: 阿尔都塞
+    definition: 个体被召唤、承认并占据某一主体位置的过程，同时也是服从结构的过程
+
+  # ====================== 三、德国观念论与辩证法 ======================
+  - name: 辩证法
+    aliases: [dialectic, dialectics, 正反合]
+    philosopher: 黑格尔
+    definition: 通过矛盾的内在展开把握概念自我运动与发展的方法；不是外在的正反合公式
+  - name: 否定辩证法
+    aliases: [negative dialectics, 否定的辩证法]
+    philosopher: 阿多诺
+    definition: 拒绝在概念同一性中收编非同一者的辩证法，坚持否定性不被最终的综合所取消
+  - name: 绝对精神
+    aliases: [absolute spirit, 绝对, 绝对者]
+    philosopher: 黑格尔
+    definition: 精神经过自我异化与扬弃而达到的自我认识总体，是主客同一的最高形态
+  - name: 扬弃
+    aliases: [aufheben, sublation, 扬弃, 升华与取消]
+    philosopher: 黑格尔
+    definition: 既取消又保存并提升的辩证运动环节，是概念自我发展的基本机制
+  - name: 我思
+    aliases: [cogito, 我思故我在, cogito ergo sum]
+    philosopher: 笛卡尔
+    definition: 怀疑一切时唯一不可怀疑者——正在怀疑的我在存在，是近代主体性的起点
+  - name: 先验主体性
+    aliases: [transcendental subjectivity, 先验自我, 先验统觉]
+    philosopher: 康德
+    definition: 使经验对象得以可能的先天认识结构之承担者，非经验性的心理自我
+  - name: 物自体
+    aliases: [thing-in-itself, Ding an sich, 自在之物]
+    philosopher: 康德
+    definition: 独立于我们的认识形式而存在、但不可被认识的对象，是现象界的界限概念
+  - name: 先验综合判断
+    aliases: [先天综合判断, synthetic a priori]
+    philosopher: 康德
+    definition: 既不依赖经验又能扩展知识的判断，是形而上学作为科学如何可能的根据
+  - name: 绝对命令
+    aliases: [定言命令, categorical imperative]
+    philosopher: 康德
+    definition: 无条件有效的道德法则，要求准则能够成为普遍立法
+  - name: 二律背反
+    aliases: [antinomy, 二律背反]
+    philosopher: 康德
+    definition: 理性在超出现象界运用时必然陷入的正反两方皆可证明的对立
+  - name: 先验
+    aliases: [transcendental, 超验, transcendent]
+    philosopher: 康德
+    definition: 先验指使经验得以可能者；超验指超出一切经验界限者，二者不可混用
+  - name: 独断论
+    aliases: [dogmatism, 独断]
+    philosopher: 康德
+    definition: 未经批判地预设理性可把握自在之物的立场，为康德所批判
+  - name: 怀疑论
+    aliases: [skepticism, 怀疑主义]
+    philosopher: 休谟
+    definition: 对因果必然性与理性能力的怀疑立场；休谟以此「唤醒」康德走出独断论
+  - name: 自我意识
+    aliases: [self-consciousness, 自我意识, 自身意识]
+    philosopher: 黑格尔
+    definition: 意识以自身为对象的活动；黑格尔视之为欲望性的，需他者承认方能成立
+  - name: 本有
+    aliases: [Ereignis, 本成, 事件化]
+    philosopher: 海德格尔
+    definition: 存在自身的成己发生，人与存在的相互归属性在其中被赠予
+  - name: 存在论差异
+    aliases: [ontological difference, 存在与存在者的差异]
+    philosopher: 海德格尔
+    definition: 存在与存在者之间的差异；西方形而上学史即遗忘此差异、把存在当作存在者的历史
+  - name: 此在
+    aliases: [Dasein, 缘在]
+    philosopher: 海德格尔
+    definition: 人之存在方式，其本质在于对存在的领会与追问，总是「在世存在」
+  - name: 在世存在
+    aliases: [being-in-the-world, In-der-Welt-sein]
+    philosopher: 海德格尔
+    definition: 此在的基本建构：此在并非先有而后进入世界，而是始终已在世界之中
+  - name: 去蔽
+    aliases: [aletheia, 无蔽, 真理即去蔽]
+    philosopher: 海德格尔
+    definition: 真理的源初含义是存在的无蔽状态，而非命题与事实的符合
+  - name: 面向事情本身
+    aliases: [回到事物本身, zu den Sachen selbst]
+    philosopher: 胡塞尔
+    definition: 悬置自然态度，直接描述意识中被给予的现象，是现象学的口号
+  - name: 现象学还原
+    aliases: [epoché, 悬置, 加括号]
+    philosopher: 胡塞尔
+    definition: 中止对世界存在的自然信念，以纯粹意识及其意向性为研究领域
+
+  # ====================== 四、结构主义与后结构主义 ======================
+  - name: 结构主义
+    aliases: [structuralism, 结构主义]
+    philosopher: 索绪尔
+    definition: 认为意义由符号系统的差异关系而非实体属性决定的方法论纲领；符号系统是有生产性的
+  - name: 后结构主义
+    aliases: [post-structuralism, 解构主义]
+    philosopher: 德里达
+    definition: 质疑结构之封闭性与中心化的思潮，强调差异、延异与意义的不可最终固定
+  - name: 解构
+    aliases: [deconstruction, 解构]
+    philosopher: 德里达
+    definition: 揭示文本内部等级对立与自我拆解机制的阅读策略，非任意的破坏
+  - name: 延异
+    aliases: [différance, 分延]
+    philosopher: 德里达
+    definition: 意义的差异与延迟之双重运动，使任何最终的在场与同一性都不可能
+  - name: 建构论
+    aliases: [constructivism, 社会建构论, 建构主义]
+    definition: 认为知识或实在由社会—符号过程建构的立场；哲学大纲视其为一字头中资本主义的仆从形态
+
+  # ====================== 五、马克思主义与政治经济学 ======================
+  - name: 剩余价值
+    aliases: [surplus value, 剩余价值]
+    philosopher: 马克思
+    definition: 雇佣劳动所创造、被资本无偿占有的超过劳动力价值的价值，是资本积累的源泉
+  - name: 资本
+    aliases: [capital, 资本]
+    philosopher: 马克思
+    definition: 能够自行增殖的价值，其运动以「惊险的一跃」（商品变货币）为条件
+  - name: 异化
+    aliases: [alienation, 疏离, 外化]
+    philosopher: 马克思
+    definition: 人的活动及其产物作为异己力量反过来支配人；在黑格尔处为精神的外化与回归环节
+  - name: 拜物教
+    aliases: [fetishism, 商品拜物教, 物神崇拜]
+    philosopher: 马克思
+    definition: 把社会关系误认为物自身的属性；商品与货币因而获得神秘的社会效力
+  - name: 无产阶级
+    aliases: [proletariat, 工人阶级]
+    philosopher: 马克思
+    definition: 除劳动力外一无所有、被迫出卖劳动力以维生的阶级，被设想为普遍解放的承担者
+  - name: 帝国主义
+    aliases: [imperialism, 帝国主义]
+    philosopher: 列宁
+    definition: 资本主义的垄断阶段；资本输出、金融资本统治与列强瓜分世界构成其基本特征
+  - name: 意识形态批判
+    aliases: [ideology critique, 意识形态批判]
+    philosopher: 马克思
+    definition: 揭示观念系统如何服务于统治关系再生产、并把历史性产物自然化的分析工作
+  - name: 历史唯物主义
+    aliases: [historical materialism, 唯物史观]
+    philosopher: 马克思
+    definition: 以生产方式与阶级关系解释历史变迁的纲领：社会存在决定社会意识
+
+  # ====================== 六、认识论立场与学派 ======================
+  - name: 理性主义
+    aliases: [rationalism, 唯理论]
+    philosopher: 笛卡尔
+    definition: 认为理性自身可提供不依赖经验的确定性知识之立场
+  - name: 经验主义
+    aliases: [empiricism, 经验论]
+    philosopher: 洛克
+    definition: 认为一切知识源于经验、心灵最初如白板的立场
+  - name: 物理主义
+    aliases: [physicalism, 唯物主义还原论]
+    philosopher: 纽拉特
+    definition: 主张一切科学命题可翻译为物理语言的纲领；哲学大纲视其为一字头下还原论的心理学
+  - name: 行为主义
+    aliases: [behaviorism, 行为主义心理学]
+    philosopher: 斯金纳
+    definition: 只以可观察的刺激—反应描述心理现象的纲领，完全无视内在世界
+  - name: 认知主义
+    aliases: [cognitivism, 认知主义]
+    definition: 以信息加工与功能结构解释心智的立场，在哲学大纲中位于建构论与行为主义之间
+  - name: 功能主义
+    aliases: [functionalism, 功能主义]
+    definition: 以功能角色而非质料界定心理状态的立场；哲学大纲指出其在一字头中的调和性
+  - name: 唯灵论
+    aliases: [spiritualism, 灵论]
+    definition: 以灵魂或精神性本原解释世界与不死问题的立场，属宗教实在论的一支
+  - name: 还原论
+    aliases: [reductionism, 还原主义]
+    definition: 把高层现象化约为低层要素的立场，是形而下学的典型操作方式
+  - name: 一元论
+    aliases: [monism, 一元论]
+    philosopher: 斯宾诺莎
+    definition: 主张只存在唯一本原或实体的立场
+  - name: 二元论
+    aliases: [dualism, 心物二元, 实体二元论]
+    philosopher: 笛卡尔
+    definition: 心灵与身体是两种彼此独立的实体，本质分别为思维与广延
+  - name: 虚无主义
+    aliases: [nihilism, 虚无主义]
+    philosopher: 尼采
+    definition: 最高价值自行贬黜的状态；尼采视之为需要被克服亦需被直面者
+  - name: 权力意志
+    aliases: [will to power, 强力意志]
+    philosopher: 尼采
+    definition: 生命的根本冲动在于自我超越与力量的增长，而非单纯自保
+  - name: 超人
+    aliases: [Übermensch, overman]
+    philosopher: 尼采
+    definition: 能自我立法、承担价值创造的人，是价值重估的目标
+  - name: 永恒轮回
+    aliases: [eternal recurrence, 永劫回归]
+    philosopher: 尼采
+    definition: 一切事物将无限重复，是对生命肯定与否的试金石
+  - name: 存在主义
+    aliases: [existentialism, 实存主义]
+    philosopher: 萨特
+    definition: 存在先于本质，人被判定为自由并须为自己的选择负责
+  - name: 虚无
+    aliases: [void, 无, 空, 空洞背景]
+    definition: 哲学大纲区分两种无：可被填充的场域之无，与不可被填充、不可表象的主体性之无
+  - name: 在场形而上学
+    aliases: [metaphysics of presence, 在场的形而上学]
+    philosopher: 德里达
+    definition: 以在场、同一与本源为终极根据的形而上学传统，为解构所批判
+  - name: 根据律
+    aliases: [principle of sufficient reason, 充足理由律, Satz vom Grund]
+    philosopher: 莱布尼茨
+    definition: 一切皆有根据的原则；哲学大纲视其为形而下学组织知识因果链的形式
+
+  # ====================== 七、古典哲学概念 ======================
+  - name: 理念论
+    aliases: [理念, 理型, eidos, idea, 相论]
+    philosopher: 柏拉图
+    definition: 可感事物之外独立自存的永恒形式，是知识与实在的真正对象
+  - name: 四因说
+    aliases: [四因, 形式因, 目的因, 动力因, 质料因]
+    philosopher: 亚里士多德
+    definition: 解释事物生成的四种原因：质料、形式、动力、目的
+  - name: 实体
+    aliases: [本体, substance, ousia, Entity]
+    philosopher: 亚里士多德
+    definition: 独立存在、不依附他物的最基本存在者
+  - name: 中道
+    aliases: [中庸, golden mean, 黄金中道]
+    philosopher: 亚里士多德
+    definition: 德性处于过度与不足之间的适度状态，由实践智慧确定
+  - name: 德性
+    aliases: [美德, 德行, virtue, arete]
+    philosopher: 亚里士多德
+    definition: 使事物良好地履行其功能的稳定品质，人的德性即理性活动的优秀状态
+  - name: 太一
+    aliases: [the One, 一者, 大一]
+    philosopher: 普罗提诺
+    definition: 万物由之流溢而出的最高本原，超越存在与思想
+  - name: 光照说
+    aliases: [神圣光照, illumination]
+    philosopher: 奥古斯丁
+    definition: 人的心灵需借助上帝之光的照耀才能把握永恒真理
+  - name: 恩典
+    aliases: [grace, 神恩]
+    philosopher: 奥古斯丁
+    definition: 上帝无偿赐予的救助，是意志从罪中转向善的必要条件
+  - name: 单子
+    aliases: [monad, 单子论]
+    philosopher: 莱布尼茨
+    definition: 不可分的、有知觉的精神性实体，构成世界的基本单位
+  - name: 白板
+    aliases: [tabula rasa, 白纸]
+    philosopher: 洛克
+    definition: 心灵最初如白板，一切知识均来自经验
+  - name: 存在即被感知
+    aliases: [esse est percipi]
+    philosopher: 贝克莱
+    definition: 可感事物的存在就在于被心灵所感知
+  - name: 习惯性联想
+    aliases: [因果性联想, custom, habit]
+    philosopher: 休谟
+    definition: 因果关系只是由恒常会合产生的心理习惯，非理性所能证明
+  - name: 是—应当问题
+    aliases: [休谟法则, is-ought problem, 事实与价值]
+    philosopher: 休谟
+    definition: 从事实判断不能逻辑地推出价值判断
+  - name: 仁
+    aliases: [ren, 仁爱, 爱人]
+    philosopher: 孔子
+    definition: 爱人、推己及人的根本德性，是礼的内在根据
+  - name: 道
+    aliases: [Tao, 大道]
+    philosopher: 老子
+    definition: 无形无名、先于天地而生的万物本原与运行法则
+  - name: 无为
+    aliases: [wu wei, 无为而治]
+    philosopher: 老子
+    definition: 不以私意妄加干预，顺任事物自然之势而行
+  - name: 齐物
+    aliases: [齐物论, 物我两忘]
+    philosopher: 庄子
+    definition: 破除是非彼此的分别，从道的视角看万物齐一
+  - name: 逍遥
+    aliases: [逍遥游, 无待]
+    philosopher: 庄子
+    definition: 无所依待、与道合一的精神自由境界
+  - name: 性善
+    aliases: [性善论, 四端]
+    philosopher: 孟子
+    definition: 人天生具有恻隐、羞恶、辞让、是非四端，为仁义礼智之萌芽
+  - name: 化性起伪
+    aliases: [性恶论, 伪, 人为]
+    philosopher: 荀子
+    definition: 人之本性好利疾恶，善是后天人为教化与礼法约束的结果
+  - name: 格物致知
+    aliases: [格物, 即物穷理]
+    philosopher: 朱熹
+    definition: 即事物而穷究其理，积久贯通以达豁然贯通之知
+  - name: 致良知
+    aliases: [良知, 知行合一]
+    philosopher: 王阳明
+    definition: 良知是心之本体，致良知即推致良知于事事物物，知行本为一体

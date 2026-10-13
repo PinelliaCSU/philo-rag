@@ -1,0 +1,79 @@
+# ============================================================================
+# Philo-RAG 配置 · 哲学大纲知识库
+# 数据加载 / 分块 / 向量化 / 检索 / 生成 / 输出，六段全部可调，切换只改这里
+# ============================================================================
+
+# ---------- 1. 数据加载 ----------
+doc:
+  id: zhuyi-zhuyi-001
+  title: 哲学大纲
+  # 原始语料（采集入口）：prepare 命令读它。支持 .pdf / .txt / .md
+  raw: ../哲学大纲_规范化_全集.pdf
+  # 清洗产物（索引入口）：build 命令读它。由 prepare 命令生成
+  source: data/哲学大纲_规范化_全集.txt
+  store_dir: store
+  # 清洗选项
+  strip_annotations: false    # true 则剔除【释：】【按：】【补：】整理者标注
+  skip_front_matter: false    # false 则保留体例说明与体系总纲（含「字头」等关键定义）
+
+# ---------- 2. 词典（元数据抽取的来源，决定检索精度）----------
+lexicon:
+  philosophers: lexicon/philosophers.yaml   # 理论家：别名归一 + 生卒年 + 流派
+  concepts: lexicon/concepts.yaml           # 概念：别名 + 归属 + 定义
+  taxonomy: lexicon/哲学大纲_体系.yaml        # 体系目录：字头 / 四层 / 四话语 / 338 单元
+
+# ---------- 3. 分块 ----------
+chunk:
+  max_chars: 480            # 单块上限（超过则按句边界再切）
+  min_chars: 140            # 低于此长度与相邻段合并
+  overlap_chars: 120        # 因长度切分时的重叠，避免切断论证
+  split_quotes: true        # 引文单独成块（供「按理论家/概念检索引文」）
+  quote_min_chars: 12       # ASCII 直引号成对抽取的最小长度（滤掉术语强调）
+  quote_min_chars_reliable: 6  # 「」/“” 可靠标记的最小长度（可放宽）
+  keep_footnotes: true      # 脚注单独成块
+  enrich_embed_text: true   # 向量/BM25 的输入 = 章节路径 + 元数据标签 + 正文
+
+# ---------- 4. 向量化 ----------
+embedding:
+  # sentence_transformer（本地语义向量，推荐）| hashing（离线词法近似）| api（云端）
+  backend: sentence_transformer
+  model: models/bge-small-zh-v1.5   # 中文语义模型；升级可换 BAAI/bge-base-zh-v1.5
+  dim: 512                          # 仅 hashing 后端使用
+  batch_size: 64
+  device: cpu                       # cpu | cuda
+  api_base: ""                      # backend=api 时填写，形如 https://api.xxx.com/v1
+  api_key: ""
+
+# ---------- 5. 检索 ----------
+retrieval:
+  dense_top_k: 40           # 稠密路候选数
+  sparse_top_k: 40          # 稀疏（BM25）路候选数
+  fusion: rrf               # 倒数排名融合
+  rrf_k: 60
+  dense_weight: 1.0         # 稠密路权重（hashing 后端建议降到 0.3）
+  sparse_weight: 1.0        # 稀疏路权重
+  entity_boost: 0.004       # 查询实体被块元数据命中时的加分（消除 RRF 平票）
+  definition_boost: 0.02    # 问「什么是 X」时，块内出现 X 定义句式的加分
+  final_top_k: 8            # 最终返回条数
+  expand_query: true        # 用词典做查询扩展（术语 → 别名 / 外文名）
+  rerank: false             # true 需 sentence-transformers 的 CrossEncoder
+  rerank_model: BAAI/bge-reranker-v2-m3
+
+# ---------- 6. 生成 ----------
+answer:
+  backend: template         # template（离线抽取式）| ollama（本地模型）| api（云端）
+  model: qwen2.5:7b
+  ollama_base: http://localhost:11434
+  api_base: ""
+  api_key: ""
+  max_context_chunks: 8
+  temperature: 0.2
+  max_answer_chars: 400     # 提示词里对回答长度的约束
+
+# ---------- 7. 结果输出 ----------
+output:
+  format: md                # md | json | jsonl | csv | txt（CLI --format 可覆盖）
+  dir: outputs              # 输出目录
+  show_citations: true      # 是否附引用来源
+  citation_style: full      # full（书名·章节·字符区间）| short（章节）
+  top_k: 8

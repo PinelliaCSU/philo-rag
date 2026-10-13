@@ -1,0 +1,958 @@
+# 理论家词典 · 为《哲学大纲》语料定制
+# 依据：全书 200 万字语料中的人物提及频次（括号内为实测次数）
+# 用途：① 元数据抽取（别名归一）② 年代/流派过滤 ③ 实体加权 ④ 引文说话人识别
+#
+# 字段说明：
+#   name    标准名（写入 chunk.philosophers）
+#   aliases 别名与外文名（正文/查询中出现的其他写法）
+#   birth / death  生卒年（用于按年代排序；负数为公元前，近似值即可）
+#   era     思想史阶段（写入 chunk.eras，用于「按年代检索」）
+#   school  流派归属（用于「按流派检索」）
+philosophers:
+  # ---------- 德国观念论（全书核心，3-2 卷主轴）----------
+  - name: 康德
+    aliases: [Kant, 伊曼努尔·康德]
+    birth: 1724
+    death: 1804
+    era: 德国观念论
+    school: 德国观念论
+  - name: 费希特
+    aliases: [Fichte, 约翰·戈特利布·费希特]
+    birth: 1762
+    death: 1814
+    era: 德国观念论
+    school: 德国观念论
+  - name: 谢林
+    aliases: [Schelling, 晚期谢林, 早期谢林]
+    birth: 1775
+    death: 1854
+    era: 德国观念论
+    school: 德国观念论
+  - name: 黑格尔
+    aliases: [Hegel, 黑格爾]
+    birth: 1770
+    death: 1831
+    era: 德国观念论
+    school: 德国观念论
+  - name: 荷尔德林
+    aliases: [Hölderlin, 荷尔德林]
+    birth: 1770
+    death: 1843
+    era: 德国观念论
+    school: 德国观念论
+  - name: 雅可比
+    aliases: [Jacobi]
+    birth: 1743
+    death: 1819
+    era: 德国观念论
+    school: 德国观念论
+  - name: 诺瓦利斯
+    aliases: [Novalis]
+    birth: 1772
+    death: 1801
+    era: 德国浪漫派
+    school: 浪漫主义
+  - name: 施莱尔马赫
+    aliases: [Schleiermacher]
+    birth: 1768
+    death: 1834
+    era: 德国浪漫派
+    school: 浪漫主义
+
+  # ---------- 近代早期哲学 ----------
+  - name: 笛卡尔
+    aliases: [Descartes, 笛卡儿]
+    birth: 1596
+    death: 1650
+    era: 近代早期
+    school: 理性主义
+  - name: 斯宾诺莎
+    aliases: [Spinoza, 斯宾诺沙]
+    birth: 1632
+    death: 1677
+    era: 近代早期
+    school: 理性主义
+  - name: 莱布尼茨
+    aliases: [Leibniz, 莱布尼兹]
+    birth: 1646
+    death: 1716
+    era: 近代早期
+    school: 理性主义
+  - name: 洛克
+    aliases: [Locke]
+    birth: 1632
+    death: 1704
+    era: 近代早期
+    school: 经验主义
+  - name: 贝克莱
+    aliases: [Berkeley, 巴克莱]
+    birth: 1685
+    death: 1753
+    era: 近代早期
+    school: 经验主义
+  - name: 休谟
+    aliases: [Hume]
+    birth: 1711
+    death: 1776
+    era: 近代早期
+    school: 经验主义
+  - name: 培根
+    aliases: [Bacon, 弗兰西斯·培根]
+    birth: 1561
+    death: 1626
+    era: 近代早期
+    school: 经验主义
+  - name: 霍布斯
+    aliases: [Hobbes]
+    birth: 1588
+    death: 1679
+    era: 近代早期
+    school: 政治哲学
+  - name: 伽利略
+    aliases: [Galileo, 伽利略·伽利雷]
+    birth: 1564
+    death: 1642
+    era: 近代早期
+    school: 近代科学
+  - name: 牛顿
+    aliases: [Newton, 艾萨克·牛顿]
+    birth: 1643
+    death: 1727
+    era: 近代早期
+    school: 近代科学
+  - name: 哥白尼
+    aliases: [Copernicus, 哥白尼]
+    birth: 1473
+    death: 1543
+    era: 近代早期
+    school: 近代科学
+  - name: 开普勒
+    aliases: [Kepler]
+    birth: 1571
+    death: 1630
+    era: 近代早期
+    school: 近代科学
+
+  # ---------- 古希腊 ----------
+  - name: 苏格拉底
+    aliases: [Socrates]
+    birth: -470
+    death: -399
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 柏拉图
+    aliases: [Plato, 柏氏]
+    birth: -427
+    death: -347
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 亚里士多德
+    aliases: [Aristotle, 亚氏, 阿里士多德]
+    birth: -384
+    death: -322
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 巴门尼德
+    aliases: [Parmenides]
+    birth: -515
+    death: -450
+    era: 古希腊
+    school: 爱利亚学派
+  - name: 赫拉克利特
+    aliases: [Heraclitus]
+    birth: -535
+    death: -475
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 普罗提诺
+    aliases: [Plotinus]
+    birth: 204
+    death: 270
+    era: 晚期古代
+    school: 新柏拉图主义
+  - name: 奥古斯丁
+    aliases: [Augustine, 圣奥古斯丁]
+    birth: 354
+    death: 430
+    era: 教父哲学
+    school: 基督教哲学
+  - name: 托马斯·阿奎那
+    aliases: [阿奎那, Aquinas, Thomas Aquinas, 圣托马斯]
+    birth: 1225
+    death: 1274
+    era: 经院哲学
+    school: 经院哲学
+
+  # ---------- 19 世纪 ----------
+  - name: 马克思
+    aliases: [Marx, 卡尔·马克思]
+    birth: 1818
+    death: 1883
+    era: 19世纪
+    school: 马克思主义
+  - name: 恩格斯
+    aliases: [Engels, 弗里德里希·恩格斯]
+    birth: 1820
+    death: 1895
+    era: 19世纪
+    school: 马克思主义
+  - name: 叔本华
+    aliases: [Schopenhauer]
+    birth: 1788
+    death: 1860
+    era: 19世纪
+    school: 唯意志论
+  - name: 尼采
+    aliases: [Nietzsche, 尼采]
+    birth: 1844
+    death: 1900
+    era: 19世纪
+    school: 生命哲学
+  - name: 克尔凯郭尔
+    aliases: [Kierkegaard, 祁克果]
+    birth: 1813
+    death: 1855
+    era: 19世纪
+    school: 存在主义先驱
+  - name: 达尔文
+    aliases: [Darwin, 查尔斯·达尔文]
+    birth: 1809
+    death: 1882
+    era: 19世纪
+    school: 进化论
+  - name: 斯宾塞
+    aliases: [Spencer, 赫伯特·斯宾塞]
+    birth: 1820
+    death: 1903
+    era: 19世纪
+    school: 社会进化论
+  - name: 狄尔泰
+    aliases: [Dilthey]
+    birth: 1833
+    death: 1911
+    era: 19世纪
+    school: 生命哲学
+  - name: 柏格森
+    aliases: [Bergson]
+    birth: 1859
+    death: 1941
+    era: 19世纪
+    school: 生命哲学
+  - name: 考茨基
+    aliases: [Kautsky]
+    birth: 1854
+    death: 1938
+    era: 19世纪
+    school: 马克思主义
+  - name: 伯恩斯坦
+    aliases: [Bernstein, 爱德华·伯恩斯坦]
+    birth: 1850
+    death: 1932
+    era: 19世纪
+    school: 马克思主义
+  - name: 普列汉诺夫
+    aliases: [Plekhanov]
+    birth: 1856
+    death: 1918
+    era: 19世纪
+    school: 马克思主义
+  - name: 卢森堡
+    aliases: [Luxemburg, 罗莎·卢森堡]
+    birth: 1871
+    death: 1919
+    era: 20世纪
+    school: 马克思主义
+  - name: 列宁
+    aliases: [Lenin, 弗拉基米尔·列宁]
+    birth: 1870
+    death: 1924
+    era: 20世纪
+    school: 马克思主义
+  - name: 托洛茨基
+    aliases: [Trotsky]
+    birth: 1879
+    death: 1940
+    era: 20世纪
+    school: 马克思主义
+  - name: 布哈林
+    aliases: [Bukharin]
+    birth: 1888
+    death: 1938
+    era: 20世纪
+    school: 马克思主义
+  - name: 斯大林
+    aliases: [Stalin, 约瑟夫·斯大林]
+    birth: 1878
+    death: 1953
+    era: 20世纪
+    school: 马克思主义
+  - name: 毛泽东
+    aliases: [Mao, 毛]
+    birth: 1893
+    death: 1976
+    era: 20世纪
+    school: 马克思主义
+  - name: 卢卡奇
+    aliases: [Lukács, 格奥尔格·卢卡奇]
+    birth: 1885
+    death: 1971
+    era: 20世纪
+    school: 西方马克思主义
+  - name: 葛兰西
+    aliases: [Gramsci, 安东尼奥·葛兰西]
+    birth: 1891
+    death: 1937
+    era: 20世纪
+    school: 西方马克思主义
+  - name: 霍克海默
+    aliases: [Horkheimer]
+    birth: 1895
+    death: 1973
+    era: 20世纪
+    school: 法兰克福学派
+  - name: 阿多诺
+    aliases: [Adorno, 阿多尔诺]
+    birth: 1903
+    death: 1969
+    era: 20世纪
+    school: 法兰克福学派
+  - name: 马尔库塞
+    aliases: [Marcuse, 赫伯特·马尔库塞]
+    birth: 1898
+    death: 1979
+    era: 20世纪
+    school: 法兰克福学派
+  - name: 本雅明
+    aliases: [Benjamin, 瓦尔特·本雅明]
+    birth: 1892
+    death: 1940
+    era: 20世纪
+    school: 法兰克福学派
+  - name: 弗洛姆
+    aliases: [Fromm]
+    birth: 1900
+    death: 1980
+    era: 20世纪
+    school: 法兰克福学派
+  - name: 阿尔都塞
+    aliases: [Althusser, 路易·阿尔都塞]
+    birth: 1918
+    death: 1990
+    era: 20世纪
+    school: 结构主义马克思主义
+  - name: 普兰查斯
+    aliases: [Poulantzas]
+    birth: 1936
+    death: 1979
+    era: 20世纪
+    school: 结构主义马克思主义
+
+  # ---------- 现象学 · 存在主义 ----------
+  - name: 胡塞尔
+    aliases: [Husserl, 埃德蒙德·胡塞尔]
+    birth: 1859
+    death: 1938
+    era: 20世纪
+    school: 现象学
+  - name: 海德格尔
+    aliases: [Heidegger, 马丁·海德格尔]
+    birth: 1889
+    death: 1976
+    era: 20世纪
+    school: 现象学
+  - name: 舍勒
+    aliases: [Scheler, 马克斯·舍勒]
+    birth: 1874
+    death: 1928
+    era: 20世纪
+    school: 现象学
+  - name: 雅斯贝尔斯
+    aliases: [Jaspers]
+    birth: 1883
+    death: 1969
+    era: 20世纪
+    school: 存在主义
+  - name: 萨特
+    aliases: [Sartre, 让-保罗·萨特]
+    birth: 1905
+    death: 1980
+    era: 20世纪
+    school: 存在主义
+  - name: 梅洛庞蒂
+    aliases: [Merleau-Ponty, 梅洛-庞蒂]
+    birth: 1908
+    death: 1961
+    era: 20世纪
+    school: 现象学
+  - name: 列维纳斯
+    aliases: [Levinas, 列维纳斯]
+    birth: 1906
+    death: 1995
+    era: 20世纪
+    school: 现象学
+  - name: 伽达默尔
+    aliases: [Gadamer]
+    birth: 1900
+    death: 2002
+    era: 20世纪
+    school: 解释学
+  - name: 利科
+    aliases: [Ricoeur, 保罗·利科]
+    birth: 1913
+    death: 2005
+    era: 20世纪
+    school: 解释学
+
+  # ---------- 精神分析 ----------
+  - name: 弗洛伊德
+    aliases: [Freud, 西格蒙德·弗洛伊德]
+    birth: 1856
+    death: 1939
+    era: 20世纪
+    school: 精神分析
+  - name: 拉康
+    aliases: [Lacan, 雅克·拉康]
+    birth: 1901
+    death: 1981
+    era: 20世纪
+    school: 精神分析
+  - name: 克莱因
+    aliases: [Klein, 梅兰妮·克莱因]
+    birth: 1882
+    death: 1960
+    era: 20世纪
+    school: 精神分析
+  - name: 温尼科特
+    aliases: [Winnicott]
+    birth: 1896
+    death: 1971
+    era: 20世纪
+    school: 精神分析
+  - name: 荣格
+    aliases: [Jung, 卡尔·荣格]
+    birth: 1875
+    death: 1961
+    era: 20世纪
+    school: 分析心理学
+  - name: 赖希
+    aliases: [Reich, 威廉·赖希]
+    birth: 1897
+    death: 1957
+    era: 20世纪
+    school: 精神分析
+  - name: 米勒
+    aliases: [Miller, 雅克-阿兰·米勒]
+    birth: 1944
+    death: 0
+    era: 当代
+    school: 精神分析
+
+  # ---------- 结构主义 · 后结构主义 ----------
+  - name: 索绪尔
+    aliases: [Saussure, 费尔迪南·德·索绪尔]
+    birth: 1857
+    death: 1913
+    era: 20世纪
+    school: 结构主义
+  - name: 列维-斯特劳斯
+    aliases: [Lévi-Strauss, 列维斯特劳斯]
+    birth: 1908
+    death: 2009
+    era: 20世纪
+    school: 结构主义
+  - name: 福柯
+    aliases: [Foucault, 米歇尔·福柯]
+    birth: 1926
+    death: 1984
+    era: 20世纪
+    school: 后结构主义
+  - name: 德里达
+    aliases: [Derrida, 雅克·德里达]
+    birth: 1930
+    death: 2004
+    era: 20世纪
+    school: 后结构主义
+  - name: 德勒兹
+    aliases: [Deleuze, 吉尔·德勒兹]
+    birth: 1925
+    death: 1995
+    era: 20世纪
+    school: 后结构主义
+  - name: 巴塔耶
+    aliases: [Bataille, 乔治·巴塔耶]
+    birth: 1897
+    death: 1962
+    era: 20世纪
+    school: 后结构主义
+  - name: 巴迪欧
+    aliases: [Badiou, 阿兰·巴迪欧]
+    birth: 1937
+    death: 0
+    era: 当代
+    school: 当代法国哲学
+  - name: 朗西埃
+    aliases: [Rancière, 雅克·朗西埃]
+    birth: 1940
+    death: 0
+    era: 当代
+    school: 当代法国哲学
+  - name: 阿甘本
+    aliases: [Agamben, 吉奥乔·阿甘本]
+    birth: 1942
+    death: 0
+    era: 当代
+    school: 当代意大利哲学
+  - name: 奈格里
+    aliases: [Negri, 安东尼奥·奈格里]
+    birth: 1933
+    death: 2023
+    era: 当代
+    school: 自治主义
+  - name: 哈特
+    aliases: [Hardt, 迈克尔·哈特]
+    birth: 1960
+    death: 0
+    era: 当代
+    school: 自治主义
+  - name: 齐泽克
+    aliases: [Žižek, Zizek, 斯拉沃热·齐泽克]
+    birth: 1949
+    death: 0
+    era: 当代
+    school: 拉康主义
+  - name: 拉克劳
+    aliases: [Laclau, 恩内斯托·拉克劳]
+    birth: 1935
+    death: 2014
+    era: 当代
+    school: 后马克思主义
+  - name: 墨菲
+    aliases: [Mouffe, 尚塔尔·墨菲]
+    birth: 1943
+    death: 0
+    era: 当代
+    school: 后马克思主义
+  - name: 巴特勒
+    aliases: [Butler, 朱迪斯·巴特勒]
+    birth: 1956
+    death: 0
+    era: 当代
+    school: 当代美国理论
+  - name: 科耶夫
+    aliases: [Kojève, 亚历山大·科耶夫]
+    birth: 1902
+    death: 1968
+    era: 20世纪
+    school: 法国黑格尔主义
+  - name: 伊波利特
+    aliases: [Hyppolite]
+    birth: 1907
+    death: 1968
+    era: 20世纪
+    school: 法国黑格尔主义
+
+  # ---------- 分析哲学 · 科学哲学 ----------
+  - name: 维特根斯坦
+    aliases: [Wittgenstein, 路德维希·维特根斯坦]
+    birth: 1889
+    death: 1951
+    era: 20世纪
+    school: 分析哲学
+  - name: 罗素
+    aliases: [Russell, 伯特兰·罗素]
+    birth: 1872
+    death: 1970
+    era: 20世纪
+    school: 分析哲学
+  - name: 弗雷格
+    aliases: [Frege]
+    birth: 1848
+    death: 1925
+    era: 19世纪
+    school: 分析哲学
+  - name: 蒯因
+    aliases: [Quine, 奎因]
+    birth: 1908
+    death: 2000
+    era: 20世纪
+    school: 分析哲学
+  - name: 戴维森
+    aliases: [Davidson]
+    birth: 1917
+    death: 2003
+    era: 20世纪
+    school: 分析哲学
+  - name: 克里普克
+    aliases: [Kripke]
+    birth: 1940
+    death: 0
+    era: 当代
+    school: 分析哲学
+  - name: 普特南
+    aliases: [Putnam]
+    birth: 1926
+    death: 2016
+    era: 20世纪
+    school: 分析哲学
+  - name: 塞尔
+    aliases: [Searle, 约翰·塞尔]
+    birth: 1932
+    death: 0
+    era: 当代
+    school: 分析哲学
+  - name: 丹尼特
+    aliases: [Dennett]
+    birth: 1942
+    death: 2024
+    era: 当代
+    school: 分析哲学
+  - name: 罗蒂
+    aliases: [Rorty, 理查德·罗蒂]
+    birth: 1931
+    death: 2007
+    era: 20世纪
+    school: 新实用主义
+  - name: 詹姆斯
+    aliases: [James, 威廉·詹姆斯]
+    birth: 1842
+    death: 1910
+    era: 19世纪
+    school: 实用主义
+  - name: 杜威
+    aliases: [Dewey, 约翰·杜威]
+    birth: 1859
+    death: 1952
+    era: 20世纪
+    school: 实用主义
+  - name: 皮尔士
+    aliases: [Peirce, 皮尔斯]
+    birth: 1839
+    death: 1914
+    era: 19世纪
+    school: 实用主义
+  - name: 怀特海
+    aliases: [Whitehead, 阿尔弗雷德·怀特海]
+    birth: 1861
+    death: 1947
+    era: 20世纪
+    school: 过程哲学
+  - name: 卡西尔
+    aliases: [Cassirer, 恩斯特·卡西尔]
+    birth: 1874
+    death: 1945
+    era: 20世纪
+    school: 新康德主义
+  - name: 库恩
+    aliases: [Kuhn, 托马斯·库恩]
+    birth: 1922
+    death: 1996
+    era: 20世纪
+    school: 科学哲学
+  - name: 波普尔
+    aliases: [Popper, 卡尔·波普尔]
+    birth: 1902
+    death: 1994
+    era: 20世纪
+    school: 科学哲学
+  - name: 拉卡托斯
+    aliases: [Lakatos]
+    birth: 1922
+    death: 1974
+    era: 20世纪
+    school: 科学哲学
+  - name: 费耶阿本德
+    aliases: [Feyerabend]
+    birth: 1924
+    death: 1994
+    era: 20世纪
+    school: 科学哲学
+  - name: 纽拉特
+    aliases: [Neurath, 奥图·纽拉特, 奥托·纽拉特]
+    birth: 1882
+    death: 1945
+    era: 20世纪
+    school: 逻辑实证主义
+  - name: 卡尔纳普
+    aliases: [Carnap]
+    birth: 1891
+    death: 1970
+    era: 20世纪
+    school: 逻辑实证主义
+  - name: 爱因斯坦
+    aliases: [Einstein, 阿尔伯特·爱因斯坦]
+    birth: 1879
+    death: 1955
+    era: 20世纪
+    school: 近代科学
+  - name: 普朗克
+    aliases: [Planck]
+    birth: 1858
+    death: 1947
+    era: 20世纪
+    school: 近代科学
+
+  # ---------- 心理学 · 认知科学 ----------
+  - name: 斯金纳
+    aliases: [Skinner, 伯尔赫斯·斯金纳]
+    birth: 1904
+    death: 1990
+    era: 20世纪
+    school: 行为主义
+  - name: 华生
+    aliases: [Watson, 约翰·华生]
+    birth: 1878
+    death: 1958
+    era: 20世纪
+    school: 行为主义
+  - name: 巴甫洛夫
+    aliases: [Pavlov, 伊万·巴甫洛夫]
+    birth: 1849
+    death: 1936
+    era: 20世纪
+    school: 行为主义
+  - name: 皮亚杰
+    aliases: [Piaget, 让·皮亚杰]
+    birth: 1896
+    death: 1980
+    era: 20世纪
+    school: 认知发展心理学
+  - name: 乔姆斯基
+    aliases: [Chomsky, 诺姆·乔姆斯基]
+    birth: 1928
+    death: 0
+    era: 当代
+    school: 语言学
+
+  # ---------- 社会学 · 政治哲学 ----------
+  - name: 韦伯
+    aliases: [Weber, 马克斯·韦伯]
+    birth: 1864
+    death: 1920
+    era: 20世纪
+    school: 社会学
+  - name: 涂尔干
+    aliases: [Durkheim, 迪尔凯姆]
+    birth: 1858
+    death: 1917
+    era: 20世纪
+    school: 社会学
+  - name: 齐美尔
+    aliases: [Simmel, 西美尔]
+    birth: 1858
+    death: 1918
+    era: 20世纪
+    school: 社会学
+  - name: 帕森斯
+    aliases: [Parsons, 塔尔科特·帕森斯]
+    birth: 1902
+    death: 1979
+    era: 20世纪
+    school: 社会学
+  - name: 卢曼
+    aliases: [Luhmann, 尼克拉斯·卢曼]
+    birth: 1927
+    death: 1998
+    era: 20世纪
+    school: 系统论社会学
+  - name: 哈贝马斯
+    aliases: [Habermas, 尤尔根·哈贝马斯]
+    birth: 1929
+    death: 0
+    era: 当代
+    school: 法兰克福学派
+  - name: 霍耐特
+    aliases: [Honneth]
+    birth: 1949
+    death: 0
+    era: 当代
+    school: 法兰克福学派
+  - name: 布尔迪厄
+    aliases: [Bourdieu, 布迪厄]
+    birth: 1930
+    death: 2002
+    era: 20世纪
+    school: 社会学
+  - name: 罗尔斯
+    aliases: [Rawls, 约翰·罗尔斯]
+    birth: 1921
+    death: 2002
+    era: 20世纪
+    school: 政治哲学
+  - name: 诺齐克
+    aliases: [Nozick]
+    birth: 1938
+    death: 2002
+    era: 20世纪
+    school: 政治哲学
+  - name: 卢梭
+    aliases: [Rousseau]
+    birth: 1712
+    death: 1778
+    era: 近代早期
+    school: 政治哲学
+  - name: 孟德斯鸠
+    aliases: [Montesquieu]
+    birth: 1689
+    death: 1755
+    era: 近代早期
+    school: 政治哲学
+  - name: 亚当·斯密
+    aliases: [Adam Smith, 亚当斯密]
+    birth: 1723
+    death: 1790
+    era: 近代早期
+    school: 古典经济学
+  - name: 李嘉图
+    aliases: [Ricardo, 大卫·李嘉图]
+    birth: 1772
+    death: 1823
+    era: 19世纪
+    school: 古典经济学
+
+  # ---------- 中国哲学 ----------
+  - name: 孔子
+    aliases: [孔丘, 仲尼, Confucius]
+    birth: -551
+    death: -479
+    era: 春秋
+    school: 儒家
+  - name: 老子
+    aliases: [老聃, 李耳, Laozi, Lao Tzu]
+    birth: -571
+    death: -471
+    era: 春秋
+    school: 道家
+  - name: 孟子
+    aliases: [孟轲, Mencius]
+    birth: -372
+    death: -289
+    era: 战国
+    school: 儒家
+  - name: 庄子
+    aliases: [庄周, Zhuangzi]
+    birth: -369
+    death: -286
+    era: 战国
+    school: 道家
+  - name: 荀子
+    aliases: [荀况, 孙卿, Xunzi]
+    birth: -313
+    death: -238
+    era: 战国
+    school: 儒家
+  - name: 王阳明
+    aliases: [王守仁, 阳明先生, Wang Yangming]
+    birth: 1472
+    death: 1529
+    era: 宋明理学
+    school: 心学
+  - name: 朱熹
+    aliases: [朱子, 晦庵, Zhu Xi]
+    birth: 1130
+    death: 1200
+    era: 宋明理学
+    school: 理学
+
+  # ---------- 补录：语料高频但易漏（依据引述动词前人名挖掘）----------
+  - name: 马赫
+    aliases: [Mach, 恩斯特·马赫]
+    birth: 1838
+    death: 1916
+    era: 19世纪
+    school: 经验批判主义
+  - name: 阿芬那留斯
+    aliases: [Avenarius]
+    birth: 1843
+    death: 1896
+    era: 19世纪
+    school: 经验批判主义
+  - name: 孔德
+    aliases: [Comte, 奥古斯特·孔德]
+    birth: 1798
+    death: 1857
+    era: 19世纪
+    school: 实证主义
+  - name: 费尔巴哈
+    aliases: [Feuerbach, 路德维希·费尔巴哈]
+    birth: 1804
+    death: 1872
+    era: 19世纪
+    school: 青年黑格尔派
+  - name: 石里克
+    aliases: [Schlick, 莫里茨·石里克]
+    birth: 1882
+    death: 1936
+    era: 20世纪
+    school: 逻辑实证主义
+  - name: 艾耶尔
+    aliases: [Ayer, 阿尔弗雷德·艾耶尔]
+    birth: 1910
+    death: 1989
+    era: 20世纪
+    school: 逻辑实证主义
+  - name: 摩尔
+    aliases: [Moore, G. E. Moore, 乔治·爱德华·摩尔]
+    birth: 1873
+    death: 1958
+    era: 20世纪
+    school: 分析哲学
+  - name: 赖尔
+    aliases: [Ryle, 吉尔伯特·赖尔]
+    birth: 1900
+    death: 1976
+    era: 20世纪
+    school: 日常语言学派
+  - name: 塞拉斯
+    aliases: [Sellars, 威尔弗里德·塞拉斯]
+    birth: 1912
+    death: 1989
+    era: 20世纪
+    school: 分析哲学
+  - name: 利奥塔
+    aliases: [Lyotard, 让-弗朗索瓦·利奥塔]
+    birth: 1924
+    death: 1998
+    era: 20世纪
+    school: 后现代主义
+  - name: 克里斯蒂娃
+    aliases: [Kristeva, 朱莉娅·克里斯蒂娃]
+    birth: 1941
+    death: 0
+    era: 当代
+    school: 后结构主义
+  - name: 巴什拉
+    aliases: [Bachelard, 加斯东·巴什拉]
+    birth: 1884
+    death: 1962
+    era: 20世纪
+    school: 法国科学哲学
+  - name: 德雷福斯
+    aliases: [Dreyfus, 休伯特·德雷福斯]
+    birth: 1929
+    death: 2017
+    era: 20世纪
+    school: 现象学
+  - name: 图灵
+    aliases: [Turing, 阿兰·图灵]
+    birth: 1912
+    death: 1954
+    era: 20世纪
+    school: 计算理论
+  - name: 冯·诺依曼
+    aliases: [von Neumann, 诺依曼, 约翰·冯·诺依曼]
+    birth: 1903
+    death: 1957
+    era: 20世纪
+    school: 计算理论
+  - name: 哥德尔
+    aliases: [Gödel, 库尔特·哥德尔]
+    birth: 1906
+    death: 1978
+    era: 20世纪
+    school: 数理逻辑
+  - name: 薛定谔
+    aliases: [Schrödinger, 埃尔温·薛定谔]
+    birth: 1887
+    death: 1961
+    era: 20世纪
+    school: 近代科学

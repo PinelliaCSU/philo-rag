@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "philo-rag"
+version = "1.0.0"
+description = "《哲学大纲》知识库：引用溯源问答、术语索引与语义检索、按理论家/概念/数值单元的引文检索"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "numpy>=1.26",
+    "rank_bm25>=0.2.2",
+    "jieba>=0.42.1",
+    "PyMuPDF>=1.24",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+semantic = ["sentence-transformers>=2.7"]   # 真正的语义向量（推荐）
+docx = ["python-docx>=1.1"]                 # 解析 Word 语料
+
+[project.scripts]
+philo-rag = "philo_rag.cli:main"
+
+[tool.setuptools]
+packages = ["philo_rag"]

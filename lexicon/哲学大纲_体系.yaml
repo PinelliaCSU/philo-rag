@@ -1,0 +1,1412 @@
+title: 哲学大纲
+note: 由 scripts/gen_taxonomy.py 从规范化语料自动生成，勿手工编辑单元目录部分
+volumes:
+- 第 1 卷 实在论
+- 第 2 卷 形而上学
+- 第 3 卷 观念论
+- 第 4 卷 实践
+axes:
+  字头:
+  - code: '1'
+    name: 形而下学
+    alias: 实在论 / Realism
+    note: 尚未拥有自身本体论与自然学的状态，默认一个融贯均匀的场，一切皆可被对象化定位
+  - code: '2'
+    name: 形而上学
+    alias: Metaphysics
+    note: 意识到「存在者整体」与「一切之所在」（场）之间的二分张力
+  - code: '3'
+    name: 观念论
+    alias: Idealism
+    note: 把握主体性作为符号系统的动力学机制，以「无」为不可填充的匮乏
+  - code: '4'
+    name: 实践
+    alias: Practice
+    note: 坚持总体与总体化之差异、并随时对哲学姿态保持警惕的辩证唯物主义姿态
+  四层:
+  - code: '1'
+    name: 场域论
+    alias: field
+    note: 编号第一位：存在者整体所处之场如何被设想
+  - code: '2'
+    name: 本体论
+    alias: ontology
+    note: 编号第二位：存在者整体被如何把握
+  - code: '3'
+    name: 认识论
+    alias: epistemology
+    note: 编号第三位：知识如何可能、主体以何方式通达对象
+  - code: '4'
+    name: 目的论
+    alias: teleology
+    note: 编号第四位：体系指向的终极目标或运动方向
+  四话语:
+  - code: '1'
+    name: 主人话语
+    alias: master's discourse
+    note: 以主人能指为动因，命令被划杠的主体去生产知识，其真相是剩余快感
+  - code: '2'
+    name: 大学话语
+    alias: university discourse
+    note: 以知识为动因，把主体安置为被研究对象，是一字头科学主义的典型结构
+  - code: '3'
+    name: 癔症话语
+    alias: hysteric's discourse
+    note: 以被划杠的主体为动因，向主人质询「我是什么」，是问题意识的来源
+  - code: '4'
+    name: 分析家话语
+    alias: analyst's discourse
+    note: 以对象a为动因，反转大学话语，指向剩余快感与症状的真相
+units:
+- code: '1'
+  title: 实在论
+  depth: 1
+  volume: 第 1 卷 实在论
+- code: 1-1
+  title: 科学实在论
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-1
+  title: 复习课
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-1-1
+  title: 物理主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-1-1-1
+  title: 科学独断论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-1-2
+  title: 有机进化论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-1-3
+  title: 科学消费主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-1-4
+  title: 宇宙悲观主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-2
+  title: 建构论
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-1-2-1
+  title: 科学知识社会学
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-2-2
+  title: 科学革命论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-2-3
+  title: 文化本体论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-2-4
+  title: 解构建构论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-3
+  title: 认知主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-1-3-1
+  title: 功能主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-3-2
+  title: 自由进化论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-3-3
+  title: 认知自我主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-3-4
+  title: 认知无我论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-4
+  title: 行为主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-1-4-1
+  title: 操作行为主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-4-2
+  title: 目的行为主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-4-3
+  title: 应用行为分析
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-1-4-4
+  title: 社会行为主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2
+  title: 宗教实在论
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-2
+  title: 复习
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-2-1
+  title: 神创论
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-2-1-1
+  title: 自然神论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-1-2
+  title: 神义论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-1-3
+  title: 一元论诺斯替主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-1-4
+  title: 模态位格一元论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-2
+  title: 偶像论 偶像崇拜
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-2-2-1
+  title: 传殖主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-2-2
+  title: 部分主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-2-3
+  title: 拜物教
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-2-4
+  title: 时间崇拜
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-3
+  title: 唯灵论
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-2-3-1
+  title: 永生主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-3-2
+  title: 回归式唯灵论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-3-3
+  title: 魔法师主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-3-4
+  title: 弃绝主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-4
+  title: 反偶像论
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-2-4-1
+  title: 作为信仰的命定论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-4-2
+  title: 救世主主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-4-3
+  title: 神智论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-2-4-4
+  title: 神爱论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3
+  title: 庸俗唯我论
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-3-1
+  title: 伪唯心主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-3-1-1
+  title: '"客观唯心主义"'
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-1-2
+  title: '"主观唯心主义"'
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-1-3
+  title: 现实唯心主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-1-4
+  title: 唯梦论
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-2
+  title: 本真主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-3-2-1
+  title: 现代斯多亚主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-2-2
+  title: 现代犬儒主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-2-4
+  title: 现代智者主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-3
+  title: 唯意志主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-3-3-1
+  title: 自我中心主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-3-2
+  title: 道德严酷主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-3-3
+  title: 排他的“集体主义”
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-3-4
+  title: 厌女症-虚无主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-4
+  title: 直觉主义、体验主义、意识流
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-3-4-1
+  title: 伦理行动主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-4-2
+  title: 随笔主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-4-3
+  title: 唯美主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-3-4-4
+  title: 颓废主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4
+  title: 平庸主义
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-4
+  title: 复习
+  depth: 2
+  volume: 第 1 卷 实在论
+- code: 1-4-1
+  title: 当代自然主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-4-1-1
+  title: 和平主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-1-2
+  title: 客观主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-1-3
+  title: 沉默主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-1-4
+  title: 蒙昧主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-2
+  title: 世俗人道主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-4-2-1
+  title: 纵容主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-2-2
+  title: 多元文化主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-2-3
+  title: 环保主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-2-4
+  title: 性解放主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-3
+  title: 心理主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-4-3-1
+  title: 情绪主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-3-2
+  title: 心理正常主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-3-3
+  title: 泛性主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-3-4
+  title: 密契女性主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-4
+  title: 庸俗主义
+  depth: 3
+  volume: 第 1 卷 实在论
+- code: 1-4-4-1
+  title: 顺从主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-4-2
+  title: 粗俗主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-4-3
+  title: 四重竞争主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: 1-4-4-4
+  title: 复仇主义
+  depth: 4
+  volume: 第 1 卷 实在论
+- code: '2'
+  title: 形而上学
+  depth: 1
+  volume: 第 2 卷 形而上学
+- code: 2-1
+  title: 在场形而上学
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-1-1
+  title: 普遍主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-1-1-2
+  title: 气动一元论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-1-3
+  title: 分形多元论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-1-4
+  title: 形而上辩证主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-2
+  title: 本质主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-1-2-1
+  title: 伦理智性主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-2-2
+  title: 理念实在论、理想现实主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-2-3
+  title: 范畴实在论、绝对现实主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-2-4
+  title: 多产的不动论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-3
+  title: 合理主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-1-3-1
+  title: 反应多元论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-3-2
+  title: 贫乏的原子论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-3-3
+  title: 智性享乐主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-3-4
+  title: 犬儒主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-4
+  title: 绝对主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-1-4-1
+  title: 相对主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-4-2
+  title: 怀疑主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-4-3
+  title: 记忆主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-1-4-4
+  title: 话语主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2
+  title: 辩证形而上学
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-2
+  title: 复习课
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-2-1
+  title: 无限主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-2-1-1
+  title: 分子业力主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-1-2
+  title: 永恒时态主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-1-4
+  title: 摩尔唯心主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-2
+  title: 否定主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-2-2-1
+  title: 无为主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-2-2
+  title: 积极的神秘主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-2-3
+  title: 人道的自然主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-2-4
+  title: 实用的神秘主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-3
+  title: 超验主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-2-3-1
+  title: 历史符号主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-3-2
+  title: 形而上神秘主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-3-3
+  title: 理性唯灵论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-3-4
+  title: 诗的形而上学
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-4
+  title: 反二元对立
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-2-4-1
+  title: 具有伦理热忱的虚无主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-4-2
+  title: 可辩的道德箴言
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-4-3
+  title: 新实用主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-2-4-4
+  title: 原始的现象学、分析哲学
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3
+  title: 我思形而上学
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-3
+  title: 复习课
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-3-1
+  title: 实体一元论
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-3-1-1
+  title: 渐进无限主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-1-2
+  title: 运动的静止主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-1-3
+  title: 实体整体主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-1-4
+  title: 辩证一元论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-2
+  title: 心物二元论
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-3-2-1
+  title: 理性动物主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-2-2
+  title: 理性神秘主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-2-3
+  title: 超越的内在论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-2-4
+  title: 现代理性主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-3
+  title: 单子主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-3-3-1
+  title: 前定主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-3-2
+  title: 体系完美主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-3-3
+  title: 逻辑原子主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-3-4
+  title: 分割的整体主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-4
+  title: 宇宙平等主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-3-4-1
+  title: 数理还原主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-4-2
+  title: 稳定的干涉主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-4-3
+  title: 物理归纳主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-3-4-4
+  title: 时空绝对主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4
+  title: 反形而上学
+  depth: 2
+  volume: 第 2 卷 形而上学
+- code: 2-4-1
+  title: 经验主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-4-1-1
+  title: 乐于接受的小体主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-1-2
+  title: 经验的观念论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-1-3
+  title: 理念-精神二元论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-1-4
+  title: 人类有限主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-2
+  title: 实证主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-4-2-1
+  title: 自然主义的规范论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-2-2
+  title: 社会实证主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-2-3
+  title: 自然神论的实证主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-2-4
+  title: 科学的实证主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-3
+  title: 逻辑实证主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-4-3-1
+  title: 相对语法主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-3-2
+  title: 逻辑还原主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-3-3
+  title: 逻辑行为主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-3-4
+  title: 逻辑反实在论
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-4
+  title: 实用主义
+  depth: 3
+  volume: 第 2 卷 形而上学
+- code: 2-4-4-1
+  title: 逻辑实用主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-4-2
+  title: 正统辩证唯物主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-4-3
+  title: 符号实用主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: 2-4-4-4
+  title: 生存实用主义
+  depth: 4
+  volume: 第 2 卷 形而上学
+- code: '3'
+  title: 观念论
+  depth: 1
+  volume: 第 3 卷 观念论
+- code: 3-1
+  title: 现象学
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-1
+  title: 现象学复习课
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-1-1
+  title: 先验现象学
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-1-1-1
+  title: 先验直觉主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-1-2
+  title: 先验本质主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-1-3
+  title: 反思性的主体主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-1-4
+  title: 准先验辩证主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-2
+  title: 实事现象学
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-1-2-1
+  title: 媒介性的客观主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-2-2
+  title: 本质心理主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-2-3
+  title: 现象学的唯美主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-2-4
+  title: 游戏的世界象征主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-3
+  title: 生活世界现象学
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-1-3-1
+  title: 主体间普遍主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-3-2
+  title: 本土方法论
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-3-3
+  title: 格式塔现象学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-3-4
+  title: 自身性现象学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-4
+  title: 现世的现象学
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-1-4-1
+  title: 追问的现象学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-4-2
+  title: 性化的现象学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-4-3
+  title: 存在论的现象学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-1-4-4
+  title: 现象学伦理主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2
+  title: 德国观念论——人类哲学史最精华的部分
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-2
+  title: 德国观念论复习课
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-2-1
+  title: 批判哲学——以"判断"为枢纽的康德先验哲学计划
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-2-1-1
+  title: 无限的有限主义——康德哲学的基本态势
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-1-2
+  title: 先验经验主义——怀特海的过程哲学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-1-3
+  title: 先验逻辑主义——"回到康德去"
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-1-4
+  title: 符号形式主义——卡西尔的泛隐喻主义符号哲学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-3
+  title: 体系自由主义——谢林思想的转折点：绝对者内在的不一致性
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-2-3-1
+  title: 时间-本体论——谢林《世界时代》中的前本体论发生学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-3-2
+  title: 加倍的德国观念论——齐泽克心目中的世界图像
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-3-3
+  title: 生存论的存在主义——与晚期谢林心心相印的晚期海德格尔
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-3-4
+  title: 自身-辩证法——早期黑格尔 vs 晚期谢林
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-4
+  title: 辩证法——黑格尔：走向绝对精神的历史走向
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-2-4-1
+  title: 逻辑学——黑格尔的逻辑学就是一切逻辑本身
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-4-2
+  title: 否定辩证法——阿多诺过于绝望地离散了
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-4-3
+  title: 爱欲辩证法——马尔库塞的背叛
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-2-4-4
+  title: 意识形态学——阿尔都塞的"超定"辩证法
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3
+  title: 生存论复习课
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-3-1-3
+  title: 政治的理性主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-1-4
+  title: 前本体论——《从本有而来》《对于哲学的贡献》
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-2
+  title: 真正的生存主义——以命代思、非此即彼的焚心以火者
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-3-2-4
+  title: 超验-生存论
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-3
+  title: 同一生存论
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-3-3-1
+  title: 斗争的生存论
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-3-2
+  title: 直接生存论
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-3-3
+  title: 共同体的生存论
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-3-4
+  title: 金融资本主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-4
+  title: 虚构的生存论
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-3-4-1
+  title: 幸存的兄弟主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-4-2
+  title: 去中心化的科层主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-4-3
+  title: 幸福的幸存主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-3-4-4
+  title: 诗性永恒主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4
+  title: 符号学
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-4
+  title: 符号学复习课
+  depth: 2
+  volume: 第 3 卷 观念论
+- code: 3-4-1
+  title: 结构主义
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-4-1-1
+  title: 结构人本主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-1-2
+  title: 隐喻的象征主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-1-3
+  title: 分类性的叙事学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-1-4
+  title: 陈述性的话语主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-2
+  title: 后结构主义
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-4-2-1
+  title: 无意识的主体主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-2-2
+  title: 静止的事件主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-2-3
+  title: 哲学的墨守成规
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-2-4
+  title: 螺旋的贱斥主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-3
+  title: 差异的辩证法
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-4-3-1
+  title: 游牧的辩证主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-3-2
+  title: 圆满的经济学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-3-3
+  title: 倒错的好客主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-3-4
+  title: 局部的总体主义
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-4
+  title: 解释学
+  depth: 3
+  volume: 第 3 卷 观念论
+- code: 3-4-4-1
+  title: 现象学的解释学
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-4-2
+  title: 经典的精神分析
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-4-3
+  title: 语言游戏
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: 3-4-4-4
+  title: 针对资本主义的精神分析
+  depth: 4
+  volume: 第 3 卷 观念论
+- code: '4'
+  title: 实践
+  depth: 1
+  volume: 第 4 卷 实践
+- code: 4-1
+  title: 政治-经济-意识形态批判
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-1
+  title: 政治-经济-意识形态批判复习
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-1-1
+  title: 资本主义史研究
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-1-1-1
+  title: 经济学哲学批判
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-1-2
+  title: 内外评论
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-1-3
+  title: 国际性的理论协调
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-1-4
+  title: 中派中的独立生存
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-2
+  title: 灌输
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-1-2-1
+  title: 学习 研究
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-2-2
+  title: 写作 交流
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-2-3
+  title: 正派青年的交往与团结
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-2-4
+  title: 现实的本体论化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-3
+  title: 历史的哲学化
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-1-3-1
+  title: 方法论上的总体化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-3-2
+  title: 教条的哲学化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-3-3
+  title: 体系化的理论探索
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-3-4
+  title: 争夺文化霸权
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-4
+  title: 精神化了的重复
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-1-4-1
+  title: 对意识形态的历史化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-4-2
+  title: 哲学的再现代化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-4-3
+  title: 持续地否定
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-1-4-4
+  title: 现实生活
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2
+  title: 现实的正统化
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-2
+  title: 现实的正统化复习
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-2-1
+  title: 合律组织
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-2-1-1
+  title: 获取典型性
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-1-2
+  title: 操作系统程序
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-1-3
+  title: 代表那个体系
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-1-4
+  title: 台面上的权宜之计
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-2
+  title: L主义
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-2-2-1
+  title: 受信任的联合
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-2-2
+  title: 清楚的区分
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-2-3
+  title: 前沿注意
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-2-4
+  title: 驱逐关键 debuff
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-2-4
+  title: 名为驱逐关键
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-3
+  title: 真正的国际主义
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-2-3-1
+  title: 接管 sa
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-3-2
+  title: 将邪恶的帝国主义战争转化为正义的国内战争
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-3-3
+  title: 对自决进程施加领导
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-3-4
+  title: 历史的妥协
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-4
+  title: 再来一次！
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-2-4-1
+  title: 共进退
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-4-2
+  title: 不断围绕中心旋转
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-4-3
+  title: 集体创新
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-2-4-4
+  title: 分类标准上的冲突
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3
+  title: 建设理想社会
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-3-1
+  title: 生活必须品
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-3-1-1
+  title: 组织经济生活
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-1-2
+  title: 生产的再政治化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-1-3
+  title: 列阵的统一
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-1-4
+  title: 埋下生命线
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-2
+  title: 对于生产活动的解放——要抢在历史惯性前头积极做出改变
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-3-2-1
+  title: 人道化人口
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-2-2
+  title: 激发自发性
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-2-3
+  title: 经济-妇女-儿童的三重解放
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-2-4
+  title: 解放思想
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-3
+  title: 战略-战役-战斗的统合
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-3-3-1
+  title: 攻略性组织工作
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-3-2
+  title: 纪律教育
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-3-3
+  title: 将资本社会化——投身于伟大的实践之中
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-3-4
+  title: 将全球主义替换掉
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-4
+  title: s主义的资本实现
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-3-4-1
+  title: 农业的去本地化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-4-2
+  title: 去代理人化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-4-3
+  title: 合法性的再生产
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-3-4-4
+  title: s主义的人类学实现
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4
+  title: 不可能的乌托邦
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-4
+  title: 不可能的乌托邦复习课
+  depth: 2
+  volume: 第 4 卷 实践
+- code: 4-4-1
+  title: 计划良好的人性生活方式
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-4-1-1
+  title: 业力系统
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-1-2
+  title: 再性征化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-1-3
+  title: 寄生性的享乐
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-1-4
+  title: 醒来
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-2
+  title: 去人类中心化
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-4-2-1
+  title: 永生
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-2-2
+  title: 符号性死亡
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-2-3
+  title: 衰老 成熟
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-2-4
+  title: 身体化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-3
+  title: 对合 内卷
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-4-3-1
+  title: 爱欲同化
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-3-2
+  title: 秘密间性
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-3-3
+  title: 被拯救
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-3-4
+  title: 语音
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-4
+  title: 有序的深渊
+  depth: 3
+  volume: 第 4 卷 实践
+- code: 4-4-4-1
+  title: 教育
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-4-2
+  title: 成为间隙
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-4-3
+  title: 可朽性
+  depth: 4
+  volume: 第 4 卷 实践
+- code: 4-4-4-4
+  title: 再生
+  depth: 4
+  volume: 第 4 卷 实践

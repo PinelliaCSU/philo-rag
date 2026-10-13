@@ -1,0 +1,79 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Packaging and build artifacts
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+*.whl
+
+# Test, coverage, and type-checker artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.key
+*.pem
+
+# RAG runtime outputs
+outputs/
+logs/
+*.log
+
+# Generated vector stores and indexes
+store/*
+!store/.gitkeep
+
+# Downloaded local models and large model weights
+models/
+*.bin
+*.ckpt
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# Jupyter and interactive development files
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE/editor settings
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
