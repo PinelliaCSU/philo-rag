@@ -144,6 +144,8 @@ retrieval:                    # 5. 检索
   expand_query: true
   rerank: true
   rerank_model: models/bge-reranker-v2-m3
+  rerank_top_k: 12
+  rerank_max_chars: 256
 
 answer:                       # 6. 生成（问答固定全文检索，不接受筛选条件）
   backend: template           # template | ollama | api
@@ -254,9 +256,29 @@ snapshot_download('BAAI/bge-reranker-v2-m3', local_dir='models/bge-reranker-v2-m
 retrieval:
   rerank: true
   rerank_model: models/bge-reranker-v2-m3    # 本地路径；有网环境也可填 BAAI/bge-reranker-v2-m3
+  rerank_top_k: 12                           # 只重排前 N 个候选（> final_top_k），调小可降延迟
+  rerank_max_chars: 256                      # 每个候选只喂前 N 个字符（0 = 不截断）
 ```
 
-重排会提升排序精度、增加约 50~200 ms 延迟；重排实例只加载一次并缓存，
+重排会提升排序精度、增加延迟。**每次提问的耗时几乎全在这一步**，所以做了三件事：
+
+* 重排实例与嵌入模型都在**服务启动时预热加载一次**并常驻进程缓存，提问时不会重新加载模型；
+* 只对前 `rerank_top_k` 个融合候选打分（其余保持原序接在末尾），而不是全部候选；
+* 每个候选只把前 `rerank_max_chars` 个字符喂给重排器，并把「问题 + 候选块 → 分数」
+  记进 LRU，同一个问题重复提问直接命中缓存。
+
+CPU 上 `bge-reranker-v2-m3` 约 0.3~0.6 秒/候选（随文本长度增长），因此
+`16 个候选 × 整块文本` 的每次提问要 10 秒以上。默认值（12 个候选 × 前 256 字符）
+在 28 条标注问题上的实测结果：
+
+| 配置 | Hit@1 | Hit@3 | Hit@8 | MRR | 每次提问 |
+|---|---|---|---|---|---|
+| 16 候选 · 整块（旧默认） | 0.929 | 1.000 | 1.000 | 0.958 | 11.1 s |
+| 12 候选 · 前 256 字符（新默认） | 0.964 | 1.000 | 1.000 | 0.982 | 4.6 s |
+| 12 候选 · 前 256 字符（同一个问题再问一次） | — | — | — | — | 0.1 s |
+
+`python -m philo_rag.cli eval` 复现：质量持平略升（差异在 ±1 题的噪声内），延迟降到约 1/2.4，
+重复提问近即时（命中重排缓存）。候选窗口别小于 `final_top_k`：实测 8 候选会让 Hit@3 掉到 0.964。
 模型目录缺失时只告警一次并退回融合结果，不会反复触发联网下载。想关掉改 `rerank: false` 即可。
 
 ---

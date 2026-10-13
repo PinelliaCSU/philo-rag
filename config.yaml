@@ -59,6 +59,11 @@ retrieval:
   rerank: true              # true 需 sentence-transformers 的 CrossEncoder 与本地重排模型
   rerank_model: models/bge-reranker-v2-m3   # 本地重排模型路径（相对项目根）；离线部署用
                                             # 有网环境也可填 HF 名 BAAI/bge-reranker-v2-m3
+  rerank_top_k: 12          # 只重排融合后的前 N 个候选（须 > final_top_k，留提升余量）；
+                            # CPU 上每多 1 个候选约多 0.3~0.6 秒，调小可降低每次提问的延迟
+  rerank_max_chars: 256     # 每个候选只把前 N 个字符喂给重排器（0 = 整块不截断）；
+                            # 交叉编码器耗时随长度线性增长，截断后每次提问快约一倍，
+                            # 实测检索质量不降（Hit@1/MRR 见 README「重排」一节）
 
 # ---------- 6. 生成 ----------
 answer:

@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,7 @@ from .index import Store
 from .lexicon import Lexicon
 from .retrieve import facet_summary, term_lookup
 
-_STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None}
+_STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -51,11 +52,36 @@ class AskRequest(BaseModel):
 def _load(cfg: dict) -> None:
     from .cli import get_lexicon
 
-    lex = get_lexicon(cfg)
     store_dir = Path(cfg["doc"]["store_dir"])
+
+    # 模块级 `app` 与 serve() 会各装配一次应用；同一个索引已经就绪时直接复用，
+    # 否则启动要白等一整轮「载入索引 + 加载模型」。
+    if _STATE["store"] is not None and _STATE["store_dir"] == str(store_dir):
+        _STATE["cfg"] = cfg
+        return
+
+    lex = get_lexicon(cfg)
     if not (store_dir / "chunks.jsonl").exists():
         raise SystemExit(f"索引不存在：{store_dir}\n请先运行：python -m philo_rag.cli build")
-    _STATE.update(cfg=cfg, store=Store.load(store_dir, lex), lex=lex)
+
+    t0 = time.perf_counter()
+    store = Store.load(store_dir, lex)
+    print(f"[info] 索引已载入：{len(store.chunks)} 块（{time.perf_counter() - t0:.1f}s）", flush=True)
+    _STATE.update(cfg=cfg, store=store, lex=lex, store_dir=str(store_dir))
+
+    # 启动即预热：嵌入模型（约 10s）与重排模型（构造约 1s，权重 mmap 懒加载）
+    # 都在这里加载一次并常驻进程缓存，之后每次提问只做「编码 + 检索 + 重排」，
+    # 不会重新加载模型——提问变慢时先看 _rerank，而不是怀疑模型被重建。
+    from .embed import get_embedder
+    from .retrieve import _load_reranker
+
+    t0 = time.perf_counter()
+    get_embedder(cfg["embedding"], cfg.get("_root"))
+    print(f"[info] 嵌入模型已加载并常驻内存（{time.perf_counter() - t0:.1f}s）", flush=True)
+    if cfg.get("retrieval", {}).get("rerank"):
+        t0 = time.perf_counter()
+        if _load_reranker(cfg) is not None:
+            print(f"[info] 重排模型已加载并常驻内存（{time.perf_counter() - t0:.1f}s）", flush=True)
 
 
 def create_app(cfg: dict) -> FastAPI:
@@ -168,7 +194,7 @@ def serve(cfg: dict, host: str = "127.0.0.1", port: int = 8000, reload: bool = F
         # reload 模式会重新导入模块、丢掉内存索引，这里退化为非 reload
         print("[warn] --reload 与内存索引不兼容，已按非 reload 启动")
     app = create_app(cfg)
-    print(f"哲学大纲知识库已启动 →  http://{host}:{port}")
+    print(f"哲学大纲知识库已启动 →  http://{host}:{port}", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
@@ -335,7 +361,13 @@ function askQuestion(q){
 $('#ask-btn').onclick = async () => {
   const q = $('#q').value.trim(); if(!q) return;
   const out = $('#ask-out');
-  out.innerHTML = '<div class="card muted">检索并生成中…（首次提问需加载模型，稍等）</div>';
+  // 计时逐秒刷新：重排是最贵的一步（CPU 上按候选数计费），让等待有进度感，
+  // 而不是让人以为模型又被重新加载了一遍。
+  const t0 = performance.now();
+  out.innerHTML = '<div class="card muted">检索并生成中…　<b id="ask-t">0.0s</b></div>';
+  const tick = setInterval(()=>{
+    const el = $('#ask-t'); if(el) el.textContent = ((performance.now()-t0)/1000).toFixed(1)+'s';
+  }, 100);
   $('#ask-btn').disabled = true;
   try{
     const r = await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -348,7 +380,7 @@ $('#ask-btn').onclick = async () => {
     out.innerHTML = `<div class="card"><h3>回答</h3><pre class="ans">${esc(r.answer)}</pre></div>`
       + `<div class="card"><h3>引用来源</h3>${(r.citations||[]).map(citeBlock).join('')}</div>`;
   }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-  finally{ $('#ask-btn').disabled = false; }
+  finally{ clearInterval(tick); $('#ask-btn').disabled = false; }
 };
 $('#q').addEventListener('keydown', e => { if(e.key==='Enter') $('#ask-btn').click(); });
 

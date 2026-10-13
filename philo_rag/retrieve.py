@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -252,7 +253,10 @@ def hybrid_search(
     results = _dedupe(results)
 
     if r_cfg.get("rerank"):
-        results = _rerank(results, query, cfg)
+        # 只重排融合后的前 window 个候选，而不是全部 ~80 个：
+        # 最终只取 top_k=8，重排前 12 个已留足提升余量（见 _rerank 的耗时说明）。
+        window = int(r_cfg.get("rerank_top_k", 12))
+        results = _rerank(results, query, cfg, window=window)
 
     return results[: (top_k or int(r_cfg["final_top_k"]))]
 
@@ -261,6 +265,14 @@ def hybrid_search(
 # 重排器（交叉编码器，可选）：本地路径解析 + 实例缓存 + 离线护栏
 # --------------------------------------------------------------------------- #
 _RERANK_CACHE: dict[tuple[str, str], Any] = {}
+
+# 重排输入默认截断长度：交叉编码器的耗时与输入长度成正比，见 _rerank 的说明。
+DEFAULT_RERANK_MAX_CHARS = 320
+
+# 「问题 + 候选块 → 分数」的 LRU。同一问题重复提问（界面卡片联动、复看、对比）
+# 不该再算一遍重排——那是每次提问里最贵的一步。
+_RERANK_SCORE_CACHE: OrderedDict[tuple, list[float]] = OrderedDict()
+_RERANK_SCORE_CACHE_MAX = 256
 
 
 def _resolve_model_path(model: str, root: str | Path | None) -> str:
@@ -311,18 +323,71 @@ def _load_reranker(cfg: dict[str, Any]) -> Any | None:
         return None
 
 
-def _rerank(results: list[dict[str, Any]], query: str, cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    """交叉编码器重排（可选）。模型不可用时静默退回融合结果。"""
+def _clip_chunk_text(text: str, limit: int) -> str:
+    """重排输入只取块首 `limit` 个字符（`limit <= 0` 表示不截断）。
+
+    交叉编码器的耗时随输入长度线性增长，而块首通常就是该块的论点句，
+    截断能省下大半打分时间。尽量切在句末，别把句子劈成半截。
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    window = text[:limit]
+    cut = max(window.rfind(mark) for mark in "。；！？")
+    return window[: cut + 1] if cut >= limit // 2 else window
+
+
+def _rerank(
+    results: list[dict[str, Any]],
+    query: str,
+    cfg: dict[str, Any],
+    window: int = 12,
+) -> list[dict[str, Any]]:
+    """交叉编码器重排（可选）。模型不可用时静默退回融合结果。
+
+    只对前 `window` 个融合候选打分并重排，其余保持原序接在末尾——
+    最终输出仍由调用方截断为 top_k。窗口内的候选才有机会被提进 top_k，
+    因此窗口应大于 top_k（默认 12 对 8，留 1.5 倍余量）。
+
+    每次提问的延迟几乎全在这一步（CPU 上 bge-reranker-v2-m3 约 0.6 s/对/500 字，
+    16 对就是 10 秒以上），所以打两处折扣：
+      * 打分文本截到 `rerank_max_chars`（见 _clip_chunk_text）；
+      * 同一「问题 + 候选块」的结果进 LRU，重复提问直接复用，不再过模型。
+    """
     ce = _load_reranker(cfg)
     if ce is None:
         return results
-    pairs = [(query, r["chunk"].text) for r in results]
-    scores = ce.predict(pairs)
-    if not isinstance(scores, (list, np.ndarray)):
-        scores = [scores]
-    for r, s in zip(results, scores):
-        r["rerank_score"] = float(s)
-    return sorted(results, key=lambda r: -r["rerank_score"])
+    head = results[:window]
+    tail = results[window:]
+    if not head:
+        return results
+
+    r_cfg = cfg.get("retrieval", {}) or {}
+    max_chars = int(r_cfg.get("rerank_max_chars", DEFAULT_RERANK_MAX_CHARS))
+    key = (
+        str(cfg.get("_root", "")),
+        str(r_cfg.get("rerank_model", "")),
+        window,
+        max_chars,
+        query,
+        tuple(r["chunk"].chunk_id for r in head),
+    )
+    scores = _RERANK_SCORE_CACHE.get(key)
+    if scores is None:
+        pairs = [(query, _clip_chunk_text(r["chunk"].text, max_chars)) for r in head]
+        raw = ce.predict(pairs)
+        if not isinstance(raw, (list, np.ndarray)):
+            raw = [raw]
+        scores = [float(s) for s in raw]
+        _RERANK_SCORE_CACHE[key] = scores
+        while len(_RERANK_SCORE_CACHE) > _RERANK_SCORE_CACHE_MAX:
+            _RERANK_SCORE_CACHE.popitem(last=False)
+    else:
+        _RERANK_SCORE_CACHE.move_to_end(key)
+
+    for r, s in zip(head, scores):
+        r["rerank_score"] = s
+    head.sort(key=lambda r: -r["rerank_score"])
+    return head + tail
 
 
 # --------------------------------------------------------------------------- #
