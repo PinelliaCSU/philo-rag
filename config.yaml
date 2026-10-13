@@ -67,8 +67,9 @@ answer:
   api_base: ""
   api_key: ""
   max_context_chunks: 8
+  candidate_chunks: 20       # 离线主题回答的候选证据数，再压缩为少量论证段
   temperature: 0.2
-  max_answer_chars: 400     # 提示词里对回答长度的约束
+  max_answer_chars: 700     # 提示词里对回答长度的约束
 
 # ---------- 7. 结果输出 ----------
 output:

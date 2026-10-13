@@ -13,7 +13,6 @@
     GET  /api/concepts        术语卡列表
     POST /api/ask             引用溯源问答
     GET  /api/term?term=      术语索引与语义检索
-    GET  /api/quote?...       引文检索
     GET  /api/context?...     取某块及其上下文（用于「跳转原文」）
 
 索引在进程启动时加载一次并常驻内存（BM25 与向量都在内存里，单机场景足够快）。
@@ -30,7 +29,7 @@ from pydantic import BaseModel, Field
 from .answer import answer as answer_fn
 from .index import Store
 from .lexicon import Lexicon
-from .retrieve import facet_summary, quote_payload, term_lookup
+from .retrieve import facet_summary, term_lookup
 
 _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None}
 
@@ -124,25 +123,6 @@ def create_app(cfg: dict) -> FastAPI:
                 for h in res["semantic_hits"]
             ],
         }
-
-    @app.get("/api/quote")
-    def quote(
-        philosopher: str | None = None,
-        concept: str | None = None,
-        era: str | None = None,
-        school: str | None = None,
-        unit: str | None = None,
-        volume: str | None = None,
-        speaker: str | None = None,
-        keyword: str | None = None,
-        limit: int = 30,
-    ) -> dict:
-        store, lex = _STATE["store"], _STATE["lex"]
-        return quote_payload(
-            store, lex, philosopher=philosopher, concept=concept, era=era,
-            school=school, unit=unit, volume=volume, speaker=speaker,
-            keyword=keyword, top_k=limit,
-        )
 
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
@@ -269,6 +249,16 @@ INDEX_HTML = r"""<!DOCTYPE html>
   h3{margin:18px 0 8px;font-size:15px}
   .hidden{display:none}
   .ctx-focus{background:var(--accent-soft);border-radius:8px}
+  .facet-hero{background:linear-gradient(135deg,#203653,#4779b7);color:#fff;border:0}
+  .facet-hero .muted{color:#dbe8f7}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:14px}
+  .stat-box{background:rgba(255,255,255,.13);border-radius:10px;padding:12px}
+  .stat-box b{display:block;font-size:22px;line-height:1.2}
+  .axis-card{border-left:4px solid var(--accent);padding-left:14px}
+  .axis-card h3{margin-top:0}
+  .bar{height:6px;background:#edf0f4;border-radius:99px;overflow:hidden;margin-top:7px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#4779b7,#8aaee0);border-radius:99px}
+  .unit-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:72px}
 </style>
 </head>
 <body>
@@ -281,7 +271,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <div class="tabs">
     <div class="tab on" data-t="ask">引用溯源问答</div>
     <div class="tab" data-t="term">术语检索</div>
-    <div class="tab" data-t="quote">引文检索</div>
     <div class="tab" data-t="facet">分面 / 体系</div>
   </div>
 
@@ -314,24 +303,6 @@ INDEX_HTML = r"""<!DOCTYPE html>
     <div id="term-out"></div>
   </section>
 
-  <!-- 引文 -->
-  <section id="p-quote" class="hidden">
-    <div class="card">
-      <div class="row">
-        <select id="q-speaker"><option value="">不限说话人</option></select>
-        <select id="q-unit"><option value="">不限单元</option></select>
-        <select id="q-phil"><option value="">不限理论家（含语境）</option></select>
-        <select id="q-concept"><option value="">不限概念</option></select>
-        <input type="text" id="q-kw" placeholder="引文关键词（可选）" style="flex:1">
-        <button id="quote-btn">检索</button>
-      </div>
-      <div class="muted" style="margin-top:8px">
-        「说话人」只认有引述标记的归因（精度高、覆盖低）；「理论家」含段落语境提及（召回高）。
-      </div>
-    </div>
-    <div id="quote-out"></div>
-  </section>
-
   <!-- 分面 -->
   <section id="p-facet" class="hidden">
     <div id="facet-out"></div>
@@ -344,7 +315,7 @@ const esc = s => (s??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['ask','term','quote','facet'].forEach(k =>
+  ['ask','term','facet'].forEach(k =>
     $('#p-'+k).classList.toggle('hidden', k !== t.dataset.t));
 });
 
@@ -402,28 +373,6 @@ $('#term-btn').onclick = async () => {
 };
 $('#t').addEventListener('keydown', e => { if(e.key==='Enter') $('#term-btn').click(); });
 
-// ---------- 引文 ----------
-$('#quote-btn').onclick = async () => {
-  const p = new URLSearchParams();
-  if($('#q-speaker').value) p.set('speaker', $('#q-speaker').value);
-  if($('#q-unit').value) p.set('unit', $('#q-unit').value);
-  if($('#q-phil').value) p.set('philosopher', $('#q-phil').value);
-  if($('#q-concept').value) p.set('concept', $('#q-concept').value);
-  if($('#q-kw').value.trim()) p.set('keyword', $('#q-kw').value.trim());
-  p.set('limit', '30');
-  const out = $('#quote-out'); out.innerHTML = '<div class="card muted">检索中…</div>';
-  try{
-    const r = await jget('/api/quote?' + p.toString());
-    out.innerHTML = `<div class="card"><h3>命中 ${r.count} 条引文</h3>`
-      + (r.count ? r.quotes.map(q=>`<div class="quote">「${esc(q.text)}」<div class="meta muted" style="margin-top:6px">
-          —— ${q.speaker?`<b>${esc(q.speaker)}</b>`:'未署名'}　<span class="unit">${esc(q.unit)}</span> ${esc(q.unit_title||'')}
-          <br>${esc(q.citation)}
-          ${(q.philosophers||[]).length?`<br>相关理论家：${esc(q.philosophers.slice(0,6).join('、'))}`:''}</div></div>`).join('')
-        : '<div class="muted">没有符合条件的引文，试试放宽筛选。</div>')
-      + '</div>';
-  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-};
-
 // ---------- 分面 / 体系 ----------
 function chipRow(items, onclick){
   return `<div class="grid">` + items.map(([k,n])=>
@@ -435,17 +384,24 @@ async function loadFacets(){
   const byVol = {};
   u.forEach(x => { (byVol[x.volume] ||= []).push(x); });
 
-  let h = `<div class="card"><h3>体系 · 卷与单元</h3>`;
+  let h = `<div class="card facet-hero"><div class="muted">知识结构导航</div><h2 style="margin:4px 0 0">体系 · 卷与单元</h2>
+    <div class="stat-grid"><div class="stat-box"><b>${u.length}</b><span>数值单元</span></div>
+    <div class="stat-box"><b>${Object.keys(byVol).length}</b><span>卷</span></div>
+    <div class="stat-box"><b>${f.concept.length}</b><span>核心概念</span></div></div></div>`;
   for(const v of Object.keys(byVol)){
-    h += `<div class="muted" style="margin-top:10px">${esc(v)}（${byVol[v].length} 单元）</div><div class="grid" style="margin-top:6px">`
-       + byVol[v].map(x=>`<div class="chip" data-unit="${esc(x.code)}"><span><span class="unit">${esc(x.code)}</span> ${esc(x.title)}</span></div>`).join('')
+    h += `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${esc(v)}</h3><span class="tag">${byVol[v].length} 个单元</span></div>
+      <div class="grid" style="margin-top:12px">`
+       + byVol[v].map(x=>`<div class="chip unit-card" data-unit="${esc(x.code)}"><span class="unit">${esc(x.code)}</span><span>${esc(x.title)}</span></div>`).join('')
        + `</div>`;
   }
   h += `</div>`;
 
   const names = {philosopher:'理论家', concept:'概念', era:'年代', school:'流派', speaker:'说话人', volume:'卷', unit:'数值单元'};
-  for(const k of ['philosopher','concept','speaker','era','school']){
-    h += `<div class="card"><h3>${names[k]}（${f[k].length}）</h3>${chipRow(f[k])}</div>`;
+  for(const k of ['philosopher','concept','era','school']){
+    const max = f[k][0]?.[1] || 1;
+    h += `<div class="card axis-card"><h3>${names[k]} <span class="muted">· ${f[k].length} 项</span></h3><div class="grid">`
+      + f[k].map(([name,n])=>`<div class="chip" data-k="${k}"><span>${esc(name)}<div class="bar"><i style="width:${Math.max(8,Math.round(n/max*100))}%"></i></div></span><b>${n}</b></div>`).join('')
+      + `</div></div>`;
   }
   $('#facet-out').innerHTML = h;
 
@@ -456,12 +412,10 @@ async function loadFacets(){
       document.querySelector('.tab[data-t="ask"]').click();
       $('#f-unit').value = unit;
     }
-    else if(k){ // 分面 → 去引文页按该维度检索
-      document.querySelector('.tab[data-t="quote"]').click();
-      if(k==='philosopher') $('#q-phil').value = name;
-      else if(k==='speaker') $('#q-speaker').value = name;
-      else if(k==='concept') $('#q-concept').value = name;
-      else $('#q-kw').value = name;
+    else if(k){ // 分面 → 回到问答页按该维度限定
+      document.querySelector('.tab[data-t="ask"]').click();
+      if(k==='philosopher') $('#f-phil').value = name;
+      else if(k==='concept') $('#f-concept').value = name;
     }
     window.scrollTo({top:0,behavior:'smooth'});
   });
@@ -482,9 +436,7 @@ async function loadFacets(){
       });
     };
     fill('#f-phil', f.philosopher); fill('#f-concept', f.concept);
-    fill('#q-phil', f.philosopher); fill('#q-concept', f.concept);
-    fill('#q-speaker', f.speaker);
-    fill('#f-volume', f.volume); fill('#q-unit', f.unit.slice(0,200)); fill('#f-unit', f.unit.slice(0,200));
+    fill('#f-volume', f.volume); fill('#f-unit', f.unit.slice(0,200));
     loadFacets();
   }catch(e){
     $('#stat').textContent = '初始化失败：' + e.message;

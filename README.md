@@ -3,17 +3,13 @@
 把《哲学大纲》（四卷合一，约 200 万字）做成一个**可检索、可溯源、可问答**的  
 本地知识库。全部产物都在本机，不需要联网、不需要 API Key 就能跑通完整链路。
 
-三个检索入口，各自解决一类问题：
+三个使用入口，各自解决一类问题：
 
 | 入口            | 回答什么问题                 | 机制                           |
 | ------------- | ---------------------- | ---------------------------- |
 | **引用溯源问答**    | 「什么是字头？」「大他者怎么理解？」     | 向量 + BM25 混合检索 → 生成，每个论断回跳原文 |
 | **术语索引与语义检索** | 「场域论」「客体小a」是什么意思、在哪儿出现 | 概念词典精确命中 + 语义检索兜底            |
-| **引文检索**      | 「拉康原话有哪些」「按字头 4 找引文」   | 元数据倒排 + 精确过滤，结果可枚举可核对        |
-
-> 引文检索里有两个容易混用的理论家维度：`--philosopher` 是**相关理论家**（引文所在段落  
-> 提到该人就命中，召回高），`--speaker` 是**说话人**（只认有引述标记的归因，精度高、覆盖低）。  
-> 结果按「说话人 → 引文正文提及 → 语境相关」分档排序，见 §九。
+| **分面 / 体系浏览** | 按卷、单元、理论家和概念浏览知识库 | 统计卡片、层级单元卡片与问答筛选联动 |
 
 ---
 
@@ -28,7 +24,7 @@ python -m venv .venv
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2) 一键跑通：采集语料 → 建索引 → 三类检索自检
+# 2) 一键跑通：采集语料 → 建索引 → 问答与术语自检
 python -m philo_rag.cli demo
 
 # 3) 起 Web 界面
@@ -73,7 +69,6 @@ python -m philo_rag.cli stats
 | `stats`     | 索引概览与体系结构         | —                                                                                                       |
 | `ask "问题"`  | 引用溯源问答            | `--unit 3-2` `--philosopher 黑格尔` `--concept 辩证法` `--format json` `--out x.md`                           |
 | `term "术语"` | 术语卡 + 精确命中 + 语义补充 | `--limit 8` `--format csv`                                                                              |
-| `quote`     | 引文检索              | `--philosopher` `--speaker` `--concept` `--era` `--school` `--unit` `--volume` `--keyword` `--limit 30` |
 | `facets`    | 分面统计（筛选维度）        | `--format json`                                                                                         |
 | `eval`      | 检索质量回归评测          | `--top-k 8` `--golden my.json`                                                                          |
 | `serve`     | 启动 Web 服务         | `--host` `--port` `--reload`                                                                            |
@@ -89,14 +84,8 @@ python -m philo_rag.cli ask "谢林和黑格尔的分歧在哪？" --unit 3-2
 python -m philo_rag.cli ask "什么是存在者整体？" --format md --out out/存在者整体.md
 python -m philo_rag.cli term "客体小a" --format json
 
-# 按字头检索引文（unit=4 即整个第 4 卷）
-python -m philo_rag.cli quote --unit 4 --limit 20 --format csv --out out/字头4引文.csv
-
-# 按理论家 + 概念交叉过滤（相关理论家，召回优先）
-python -m philo_rag.cli quote --philosopher 拉康 --concept 大他者
-
-# 只要拉康本人的话（说话人，精度优先）
-python -m philo_rag.cli quote --speaker 拉康
+# 浏览分面与体系统计
+python -m philo_rag.cli facets
 ```
 
 ---
@@ -161,25 +150,27 @@ output:                       # 7. 结果输出
 python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 ```
 
-内置单页界面（无前端构建步骤），四个页签对应三类检索 + 体系浏览：
+内置单页界面（无前端构建步骤），三个页签对应问答、术语检索和体系浏览：
 
 | 接口                                      | 说明                                           |
 | --------------------------------------- | -------------------------------------------- |
 | `GET /api/stats`                        | 索引概览                                         |
-| `GET /api/facets`                       | 分面统计（含说话人维度）                                 |
+| `GET /api/facets`                       | 分面统计（理论家、概念、年代、流派）                       |
 | `GET /api/units`                        | 体系目录（338 单元）                                 |
 | `GET /api/concepts`                     | 概念词典列表                                       |
 | `POST /api/ask`                         | 问答，body：`{"question": "...", "unit": "3-2"}` |
 | `GET /api/term?term=大他者`                | 术语检索                                         |
-| `GET /api/quote?unit=4&philosopher=黑格尔` | 引文检索（`speaker=` 走精确说话人）                      |
 | `GET /api/context?chunk_id=...`         | 取某块及上下文（跳转原文）                                |
 
 ---
 
 ## 六、接上大模型（可选）
 
-默认 `answer.backend: template` 是**离线抽取式**——不调用任何模型，直接给出带引用的原文要点，  
-用于自检、降级与「检索质量脱离生成质量被独立评测」。
+默认 `answer.backend: template` 是**离线抽取式**——不调用任何模型，直接从检索结果中筛选并分组原文要点。
+适合快速检索、自检和模型不可用时的降级。它不会真正重写哲学论证，因此复杂问题的逻辑综合能力有限。
+
+如果希望回答具备“核心定义—形成机制—理论张力—体系位置”的连贯论述，建议只让本地模型负责最后一步组织，
+而不是让模型重新学习整个语料库。查询时送入模型的仍是少量已检索证据，速度和可控性都明显好于每次重新提取主题。
 
 想用真正的生成式回答，二选一：
 
@@ -341,7 +332,7 @@ philo-rag/
     ├── ingest.py    解析 → 结构识别 → 分块 → 元数据抽取（L1）
     ├── embed.py     嵌入后端（sentence_transformer / hashing / api）
     ├── index.py     向量索引 + BM25 + 元数据倒排（L2）
-    ├── retrieve.py  混合检索 / 术语检索 / 引文检索
+    ├── retrieve.py  混合检索 / 术语检索 / 分面统计
     ├── answer.py    引用溯源问答（L3）
     ├── output.py    结果渲染（md / json / jsonl / csv / txt）
     ├── evaluate.py  检索质量评测（L4）

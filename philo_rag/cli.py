@@ -2,7 +2,7 @@
 
     prepare  采集清洗语料        build   构建索引
     ask      引用溯源问答        term    术语索引与语义检索
-    quote    引文检索            facets  分面统计
+    facets   分面统计与体系浏览
     eval     检索质量评测        stats   索引概览
     serve    Web 服务            demo    一键自检
 """
@@ -26,7 +26,7 @@ from . import output as output_mod
 from .answer import answer as answer_fn
 from .index import Store
 from .lexicon import Lexicon
-from .retrieve import facet_summary, quote_payload, term_lookup
+from .retrieve import facet_summary, term_lookup
 
 # 相对路径字段 → 相对 config.yaml 所在目录解析
 _PATH_KEYS = [
@@ -151,17 +151,6 @@ def cmd_term(cfg: dict, args: argparse.Namespace) -> None:
     _emit("term", res, args, cfg)
 
 
-def cmd_quote(cfg: dict, args: argparse.Namespace) -> None:
-    store, lex = open_store(cfg)
-    res = quote_payload(
-        store, lex,
-        philosopher=args.philosopher, concept=args.concept, era=args.era,
-        school=args.school, unit=args.unit, volume=args.volume,
-        speaker=args.speaker, keyword=args.keyword, top_k=args.limit,
-    )
-    _emit("quote", res, args, cfg)
-
-
 def cmd_facets(cfg: dict, args: argparse.Namespace) -> None:
     store, lex = open_store(cfg)
     _emit("facets", facet_summary(store, lex), args, cfg)
@@ -219,13 +208,6 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
             print(f"  {card['name']}（{card['philosopher']}，{card['lifespan']}）：{card['definition']}")
         print(f"  精确命中 {res['exact_total']} 块")
 
-    for kwargs in [{"philosopher": "黑格尔"}, {"unit": "3-2"},
-                   {"concept": "辩证法"}, {"speaker": "拉康"}]:
-        _rule(f"引文检索：{kwargs}")
-        payload = quote_payload(store, lex, top_k=3, **kwargs)
-        for q in payload["quotes"]:
-            print(f"  「{q['text'][:60]}…」—— {q['speaker'] or '未署名'}｜{q['unit']}")
-
     _rule("自检通过")
 
 
@@ -266,15 +248,6 @@ def main(argv: list[str] | None = None) -> None:
     p_term.add_argument("--limit", type=int, default=8)
     _add_common(p_term)
     p_term.set_defaults(func=cmd_term)
-
-    p_quote = sub.add_parser("quote", help="引文检索")
-    _add_filters(p_quote)
-    p_quote.add_argument("--speaker", action="append",
-                         help="限定**说话人**（有引述标记才成立，精度高、覆盖低）")
-    p_quote.add_argument("--keyword", help="引文正文关键词")
-    p_quote.add_argument("--limit", type=int, default=20)
-    _add_common(p_quote)
-    p_quote.set_defaults(func=cmd_quote)
 
     p_facets = sub.add_parser("facets", help="分面统计")
     _add_common(p_facets)
