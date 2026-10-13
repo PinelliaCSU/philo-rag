@@ -6,6 +6,20 @@
   api      —— 任意 OpenAI 兼容 /chat/completions 接口
 
 无论哪种后端，返回结构一致：answer + citations，前端可据 citations 跳转原文并高亮。
+
+链路（两道前置关卡 + 一次全文检索 + 生成）：
+
+    问题 ─▶ ① 问题闸门 gate.check_question
+              │ 不通过 → 直接返回 skipped，不触发任何检索
+              ▼ 通过
+            ② 全文混合检索 hybrid_search（**不施加任何元数据筛选**）
+              ▼
+            ③ 证据筛选 / 上下文组装 ─▶ 生成 ─▶ answer + citations[]
+
+② 刻意不做筛选：早期版本允许 `--unit` / `--concept` 等条件先缩小候选池再检索，
+结果是把「定义概念的段落」挡在池外——概念的定义句往往出现在前言、总纲或别的单元里，
+一旦按单元/概念过滤，召回反而被截断。所以问答链路固定为**整篇检索**：
+筛选只服务于浏览式检索（术语、引文、分面），不参与「问答要不要召回某块」的判断。
 """
 from __future__ import annotations
 
@@ -14,6 +28,7 @@ import re
 import urllib.request
 from typing import Any
 
+from .gate import check_question, skip_answer
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import _definition_terms, hybrid_search
@@ -239,27 +254,37 @@ def answer(
     lex: Lexicon,
     question: str,
     cfg: dict[str, Any],
-    philosophers: list[str] | None = None,
-    era: str | None = None,
-    concept: str | None = None,
-    school: str | None = None,
-    unit: str | None = None,
-    volume: str | None = None,
 ) -> dict[str, Any]:
-    """问答主链路：混合检索 → 组装上下文 → 生成 → 附引用。"""
-    filters = store.filter_ids(
-        philosophers=philosophers, era=era, concept=concept,
-        school=school, unit=unit, volume=volume,
-    )
+    """问答主链路：问题闸门 → 全文混合检索 → 组装上下文 → 生成 → 附引用。
+
+    注意：本链路**不接受元数据筛选**。筛选会先缩小候选池再检索，容易把承载
+    「概念定义」的段落（常在前言 / 总纲 / 其他单元）排除在外，导致内容被截断。
+    需要按单元 / 理论家 / 概念浏览时，请走 `term_lookup` / `quote_search` / 分面统计。
+    """
+    # ---- ① 问题闸门：不适合检索的问题在此终止，不进检索流程 ----
+    gate = check_question(question, lex, cfg)
+    if not gate["ok"]:
+        return {
+            "question": question,
+            "backend": "gate",
+            "skipped": True,
+            "gate": gate,
+            "answer": skip_answer(gate),
+            "citations": [],
+        }
+
     backend = cfg["answer"].get("backend", "template")
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
     candidate_ctx = int(cfg["answer"].get("candidate_chunks", max(max_ctx, 16)))
+
+    # ---- ② 全文混合检索：整篇语料参与召回，不做任何元数据筛选 ----
     hits = hybrid_search(
-        store, question, cfg, lex, filters=filters,
+        store, question, cfg, lex,
         top_k=candidate_ctx if backend == "template" else max_ctx,
     )
     doc_title = store.manifest.get("doc_title", "")
 
+    # ---- ③ 生成 ----
     if backend == "template":
         text, citation_hits = template_answer(question, hits, doc_title, lex)
     else:
@@ -300,10 +325,8 @@ def answer(
     return {
         "question": question,
         "backend": backend,
+        "skipped": False,
+        "gate": gate,
         "answer": text,
         "citations": citations,
-        "filters": {
-            "philosophers": philosophers, "era": era, "concept": concept,
-            "school": school, "unit": unit, "volume": volume,
-        },
     }

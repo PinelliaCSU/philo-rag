@@ -163,6 +163,12 @@ def hybrid_search(
     filters: set[str] | None = None,
     top_k: int | None = None,
 ) -> list[dict[str, Any]]:
+    """混合检索：查询扩展 → 稠密 + 稀疏 → RRF 融合 → 实体/定义加权 → 去重 → 可选重排。
+
+    `filters` 是**可选的浏览式过滤**（限定到某组 chunk_id 再检索）。溯源问答链路
+    **不使用**它：筛选会先缩小候选池，容易把承载概念定义的段落排除在外导致内容被截断，
+    因此问答固定整篇检索。这个参数留给「限定范围浏览」这类显式需求使用。
+    """
     r_cfg = cfg["retrieval"]
     dense_k = int(r_cfg["dense_top_k"])
     sparse_k = int(r_cfg["sparse_top_k"])

@@ -38,13 +38,14 @@ _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None}
 # 应用装配
 # --------------------------------------------------------------------------- #
 class AskRequest(BaseModel):
+    """问答请求。
+
+    只收问题本身：溯源问答固定走**全文检索**，不再接受元数据筛选——
+    筛选会把承载概念定义的段落排除在候选池外，导致内容被截断。
+    需要按单元/理论家/概念浏览，请改用 /api/term 与分面接口。
+    """
+
     question: str = Field(..., min_length=1)
-    philosopher: list[str] | None = None
-    era: str | None = None
-    concept: str | None = None
-    school: str | None = None
-    unit: str | None = None
-    volume: str | None = None
 
 
 def _load(cfg: dict) -> None:
@@ -103,11 +104,7 @@ def create_app(cfg: dict) -> FastAPI:
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
-        return answer_fn(
-            store, lex, req.question, cfg,
-            philosophers=req.philosopher, era=req.era, concept=req.concept,
-            school=req.school, unit=req.unit, volume=req.volume,
-        )
+        return answer_fn(store, lex, req.question, cfg)
 
     @app.get("/api/term")
     def term(term: str = Query(..., min_length=1), limit: int = 8) -> dict:
@@ -282,11 +279,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
         <button id="ask-btn">提问</button>
       </div>
       <div class="row" style="margin-top:10px">
-        <select id="f-unit"><option value="">不限单元</option></select>
-        <select id="f-volume"><option value="">不限卷</option></select>
-        <select id="f-phil"><option value="">不限理论家</option></select>
-        <select id="f-concept"><option value="">不限概念</option></select>
-        <button class="ghost" id="ask-clear">清空筛选</button>
+        <span class="muted">问答固定对整篇《哲学大纲》做全文检索，不限定单元或概念，避免概念内容被筛选截断。寒暄、系统询问等不适合检索的问题会被自动跳过。</span>
       </div>
     </div>
     <div id="ask-out"></div>
@@ -332,26 +325,32 @@ function citeBlock(c){
 async function jget(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
 // ---------- 问答 ----------
+function askQuestion(q){
+  $('#q').value = q;
+  document.querySelector('.tab[data-t="ask"]').click();
+  $('#ask-btn').click();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
 $('#ask-btn').onclick = async () => {
   const q = $('#q').value.trim(); if(!q) return;
   const out = $('#ask-out');
   out.innerHTML = '<div class="card muted">检索并生成中…（首次提问需加载模型，稍等）</div>';
   $('#ask-btn').disabled = true;
   try{
-    const body = {question:q};
-    if($('#f-unit').value) body.unit = $('#f-unit').value;
-    if($('#f-volume').value) body.volume = $('#f-volume').value;
-    if($('#f-phil').value) body.philosopher = [$('#f-phil').value];
-    if($('#f-concept').value) body.concept = $('#f-concept').value;
     const r = await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
-                                      body:JSON.stringify(body)}).then(r=>r.json());
+                                      body:JSON.stringify({question:q})}).then(r=>r.json());
+    if(r.skipped){
+      out.innerHTML = `<div class="card"><h3>已跳过检索</h3><pre class="ans">${esc(r.answer)}</pre>
+        <div class="muted">判定类别：${esc((r.gate||{}).category||'')}</div></div>`;
+      return;
+    }
     out.innerHTML = `<div class="card"><h3>回答</h3><pre class="ans">${esc(r.answer)}</pre></div>`
       + `<div class="card"><h3>引用来源</h3>${(r.citations||[]).map(citeBlock).join('')}</div>`;
   }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   finally{ $('#ask-btn').disabled = false; }
 };
 $('#q').addEventListener('keydown', e => { if(e.key==='Enter') $('#ask-btn').click(); });
-$('#ask-clear').onclick = () => { ['f-unit','f-volume','f-phil','f-concept'].forEach(i=>$('#'+i).value=''); };
 
 // ---------- 术语 ----------
 $('#term-btn').onclick = async () => {
@@ -407,17 +406,16 @@ async function loadFacets(){
 
   $('#facet-out').querySelectorAll('.chip').forEach(c => c.onclick = () => {
     const unit = c.dataset.unit, k = c.dataset.k;
-    const name = c.querySelector('span')?.textContent.trim() || '';
-    if(unit){ // 体系单元 → 去问答页按该单元限定
-      document.querySelector('.tab[data-t="ask"]').click();
-      $('#f-unit').value = unit;
+    const spans = c.querySelectorAll('span');
+    const name = spans[0]?.textContent.trim() || '';
+    // 问答链路已不做筛选，因此这里改为「把卡片转成一个自然语言问题」直接提问，
+    // 既保留卡片到问答的联动，又不会因为筛选而截断概念内容。
+    if(unit){
+      const title = spans[1]?.textContent.trim() || '';
+      askQuestion(`${unit}${title ? ' ' + title : ''} 的核心内容是什么？`);
     }
-    else if(k){ // 分面 → 回到问答页按该维度限定
-      document.querySelector('.tab[data-t="ask"]').click();
-      if(k==='philosopher') $('#f-phil').value = name;
-      else if(k==='concept') $('#f-concept').value = name;
-    }
-    window.scrollTo({top:0,behavior:'smooth'});
+    else if(k === 'philosopher') askQuestion(`${name} 的核心思想是什么？`);
+    else if(k === 'concept') askQuestion(`什么是${name}？`);
   });
 }
 
@@ -427,16 +425,6 @@ async function loadFacets(){
     const s = await jget('/api/stats');
     const m = s.manifest;
     $('#stat').textContent = `《${m.doc_title}》　${m.chunk_count} 块 · ${m.unit_count} 单元 · ${m.embedding_backend}/${m.vector_dim} 维`;
-    const f = await jget('/api/facets');
-    const fill = (id, items, label) => {
-      const el = $(id);
-      items.slice(0, 400).forEach(([k,n]) => {
-        const o = document.createElement('option'); o.value = k;
-        o.textContent = `${k} (${n})`; el.appendChild(o);
-      });
-    };
-    fill('#f-phil', f.philosopher); fill('#f-concept', f.concept);
-    fill('#f-volume', f.volume); fill('#f-unit', f.unit.slice(0,200));
     loadFacets();
   }catch(e){
     $('#stat').textContent = '初始化失败：' + e.message;

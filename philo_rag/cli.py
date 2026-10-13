@@ -137,11 +137,10 @@ def cmd_stats(cfg: dict, args: argparse.Namespace) -> None:
 
 def cmd_ask(cfg: dict, args: argparse.Namespace) -> None:
     store, lex = open_store(cfg)
-    res = answer_fn(
-        store, lex, args.question, cfg,
-        philosophers=args.philosopher, era=args.era, concept=args.concept,
-        school=args.school, unit=args.unit, volume=args.volume,
-    )
+    if args.no_gate:
+        # 调试/对比用：临时关闭问题闸门，强制所有问题进入检索
+        cfg.setdefault("gate", {})["enabled"] = False
+    res = answer_fn(store, lex, args.question, cfg)
     _emit("answer", res, args, cfg)
 
 
@@ -217,16 +216,6 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out", help="输出到文件（不指定则打印到终端）")
 
 
-def _add_filters(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--philosopher", action="append",
-                   help="限定相关理论家（含语境提及），可重复")
-    p.add_argument("--era", help="限定年代")
-    p.add_argument("--concept", help="限定概念")
-    p.add_argument("--school", help="限定流派")
-    p.add_argument("--unit", help="限定数值单元编号（如 1-1 / 3-2-1，或字头 1）")
-    p.add_argument("--volume", help="限定卷（如 '第 1 卷 实在论'）")
-
-
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="philo_rag", description="哲学大纲知识库 · 检索与问答")
@@ -237,9 +226,10 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("build", help="构建索引").set_defaults(func=cmd_build)
     sub.add_parser("stats", help="索引概览").set_defaults(func=cmd_stats)
 
-    p_ask = sub.add_parser("ask", help="引用溯源问答")
+    p_ask = sub.add_parser("ask", help="引用溯源问答（全文检索）")
     p_ask.add_argument("question")
-    _add_filters(p_ask)
+    p_ask.add_argument("--no-gate", action="store_true",
+                       help="关闭问题闸门，强制所有问题进入检索（调试用）")
     _add_common(p_ask)
     p_ask.set_defaults(func=cmd_ask)
 

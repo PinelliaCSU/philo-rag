@@ -61,6 +61,9 @@ retrieval:
 
 # ---------- 6. 生成 ----------
 answer:
+  # 说明：溯源问答固定对**整篇语料**做全文检索，不再接受单元/概念/理论家等筛选条件。
+  # 筛选会先缩小候选池，容易把承载概念定义的段落（常在前言/总纲/其他单元）排除在外。
+  # 需要按维度浏览请用 term / quote / facets 三类入口。
   backend: template         # template（离线抽取式）| ollama（本地模型）| api（云端）
   model: qwen2.5:7b
   ollama_base: http://localhost:11434
@@ -70,6 +73,16 @@ answer:
   candidate_chunks: 20       # 离线主题回答的候选证据数，再压缩为少量论证段
   temperature: 0.2
   max_answer_chars: 700     # 提示词里对回答长度的约束
+
+# ---------- 6b. 问题闸门（检索前置过滤）----------
+# 溯源问答的最前端关卡：不适合检索的问题在此直接跳过，不进入检索与生成。
+# 拦截类别：social 寒暄 / meta 系统询问 / fragment 碎片追问 / too_short 过短 /
+#           off_topic 实时信息与通用任务 / no_anchor 无锚点又无实词
+gate:
+  enabled: true             # false 则所有问题都进入检索（等价于 CLI 的 --no-gate）
+  min_chars: 4              # 归一化后短于此长度、且无锚点无实词时判为退化输入
+  strict: false             # true 时「无词典/体系锚点」的问题一律拦截（更严，易误杀）
+  hint: ""                  # 跳过时给出的改写建议；留空使用内置默认文案
 
 # ---------- 7. 结果输出 ----------
 output:

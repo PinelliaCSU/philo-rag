@@ -69,6 +69,12 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
         return "\n".join(lines)
 
     # md（默认）
+    if res.get("skipped"):
+        # 问题闸门判定不适合检索：没有回答与引用，只说明跳过原因
+        gate = res.get("gate") or {}
+        return (f"## 问题\n\n{res['question']}\n\n"
+                f"## 已跳过检索\n\n{res['answer']}\n\n"
+                f"> 判定类别：`{gate.get('category', '')}`\n")
     out = [f"## 问题\n\n{res['question']}\n", f"## 回答\n\n{res['answer']}\n"]
     show = (cfg or {}).get("output", {}).get("show_citations", True)
     if show and res["citations"]:
