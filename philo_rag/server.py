@@ -1,4 +1,4 @@
-"""Web 服务层：把三个检索入口暴露为 HTTP API，并内置单页界面。
+"""Web 服务层：把检索入口暴露为 HTTP API，并托管内置单页界面。
 
 启动：
     python -m philo_rag.cli serve --port 8000
@@ -6,16 +6,20 @@
     uvicorn philo_rag.server:app --port 8000
 
 接口：
-    GET  /                    单页界面
-    GET  /api/stats           索引概览
+    GET  /                    单页界面（静态资源在 philo_rag/web/ 下）
+    GET  /assets/styles.css   界面样式
+    GET  /assets/app.js       界面逻辑
+    GET  /api/stats           索引概览（含当前生成后端）
     GET  /api/facets          分面统计（筛选维度）
     GET  /api/units           体系目录（卷 → 单元）
     GET  /api/concepts        术语卡列表
-    POST /api/ask             溯源回答（自动判定点查询 / 范围查询；可传 strategy 强制）
+    POST /api/ask             溯源回答（body 可传 strategy：auto | point | theme）
     GET  /api/term?term=      术语索引与语义检索
     GET  /api/quote?...       引文检索（按理论家 / 说话人 / 概念 / 单元精确过滤）
-    GET  /api/context?...     取某块及其上下文（用于「跳转原文」）
+    GET  /api/context?...     取某块及其上下文（用于「查看上下文」）
 
+前后端分离方式：后端只提供 JSON API，界面是 `philo_rag/web/` 下的纯静态文件
+（HTML + CSS + 原生 JS，无构建步骤）。二者只通过 HTTP 接口耦合，前端可独立替换。
 索引在进程启动时加载一次并常驻内存（BM25 与向量都在内存里，单机场景足够快）。
 """
 from __future__ import annotations
@@ -24,8 +28,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .answer import answer as answer_fn
@@ -35,6 +39,16 @@ from .retrieve import facet_summary, quote_payload, term_lookup
 
 _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": None}
 
+# 前端静态资源目录（随包分发）
+_WEB_DIR = Path(__file__).resolve().parent / "web"
+
+
+def _read_web(name: str) -> str:
+    path = _WEB_DIR / name
+    if not path.exists():
+        raise HTTPException(500, f"前端资源缺失：{path}")
+    return path.read_text(encoding="utf-8")
+
 
 # --------------------------------------------------------------------------- #
 # 应用装配
@@ -42,8 +56,8 @@ _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": 
 class AskRequest(BaseModel):
     """问答请求。
 
-    只收问题本身（外加可选的 strategy）：溯源回答固定走**全文检索**，
-    不接受元数据筛选——筛选会把承载概念定义的段落排除在候选池外，导致内容被截断。
+    只收问题本身与提问方式：溯源回答固定走**全文检索**，不接受元数据筛选——
+    筛选会把承载概念定义的段落排除在候选池外，导致内容被截断。
     需要按单元/理论家/概念浏览，请改用 /api/term 与分面接口。
 
     strategy：auto（默认，按问题自动判定）| point（强制点查询）| theme（强制范围查询）。
@@ -90,12 +104,36 @@ def _load(cfg: dict) -> None:
 
 def create_app(cfg: dict) -> FastAPI:
     _load(cfg)
-    app = FastAPI(title="哲学大纲知识库", version="1.0.0")
+    app = FastAPI(title="哲学大纲知识库", version="1.1.0")
 
+    # 生成层出错（缺 key、接口报错、网络不通…）时不要把 500 裸奔给前端，
+    # 转成带可读 detail 的 JSON，界面直接显示原因而不是 "Internal Server Error"。
+    @app.exception_handler(ValueError)
+    async def _on_value_error(_req: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(RuntimeError)
+    async def _on_runtime_error(_req: Request, exc: RuntimeError) -> JSONResponse:
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+    # ---------------- 前端静态资源 ----------------
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return INDEX_HTML
+        return _read_web("index.html")
 
+    @app.get("/assets/styles.css")
+    def styles() -> Response:
+        return Response(_read_web("styles.css"), media_type="text/css; charset=utf-8")
+
+    @app.get("/assets/app.js")
+    def app_js() -> Response:
+        return Response(_read_web("app.js"), media_type="application/javascript; charset=utf-8")
+
+    @app.get("/favicon.ico")
+    def favicon() -> Response:
+        return Response(status_code=204)
+
+    # ---------------- JSON API ----------------
     @app.get("/api/stats")
     def stats() -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
@@ -177,7 +215,7 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
-        """取某块及其前后各 window 块，用于界面上的「跳转原文」."""
+        """取某块及其前后各 window 块，用于界面上的「查看上下文」。"""
         store, lex = _STATE["store"], _STATE["lex"]
         idx = next((i for i, c in enumerate(store.chunks) if c.chunk_id == chunk_id), None)
         if idx is None:
@@ -242,331 +280,3 @@ def _default_app() -> FastAPI | None:
 
 
 app = _default_app()
-
-
-# --------------------------------------------------------------------------- #
-# 内置单页界面
-# --------------------------------------------------------------------------- #
-INDEX_HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>哲学大纲 · 知识库</title>
-<style>
-  :root{
-    --bg:#f6f7f9; --panel:#ffffff; --ink:#1c2024; --muted:#5d6672;
-    --line:#e3e6ea; --accent:#2f6fd0; --accent-soft:#eaf1fc;
-    --quote:#8a5a00; --quote-bg:#fdf6e6; --ok:#1f7a44;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:15px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-  header{background:var(--panel);border-bottom:1px solid var(--line);
-         padding:14px 24px;display:flex;align-items:baseline;gap:16px;position:sticky;top:0;z-index:5}
-  header h1{font-size:18px;margin:0;letter-spacing:.5px}
-  header .sub{color:var(--muted);font-size:13px}
-  .wrap{max-width:1080px;margin:0 auto;padding:20px 24px 80px}
-  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
-  .tab{padding:7px 16px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
-       cursor:pointer;font-size:14px;color:var(--muted)}
-  .tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  input[type=text],select{padding:9px 12px;border:1px solid var(--line);border-radius:8px;
-       font-size:14px;background:#fff;color:var(--ink);font-family:inherit}
-  input[type=text]{flex:1;min-width:220px}
-  button{padding:9px 20px;border:none;border-radius:8px;background:var(--accent);color:#fff;
-         font-size:14px;cursor:pointer;font-family:inherit}
-  button.ghost{background:#fff;color:var(--accent);border:1px solid var(--accent)}
-  button:disabled{opacity:.5;cursor:default}
-  .muted{color:var(--muted);font-size:13px}
-  .cite{border-left:3px solid var(--accent);padding:2px 0 2px 12px;margin:12px 0}
-  .cite .meta{font-size:13px;color:var(--muted);margin-bottom:4px}
-  .cite .body{font-size:14px}
-  .quote{background:var(--quote-bg);color:var(--quote);border-left:3px solid var(--quote);
-         padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
-  .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);
-       border-radius:5px;padding:1px 8px;font-size:12px;margin-right:6px}
-  .unit{font-family:ui-monospace,Consolas,monospace;background:#eef1f4;color:#334;
-        border-radius:5px;padding:1px 6px;font-size:12px}
-  pre.ans{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font-size:14.5px}
-  .err{color:#b3261e;background:#fdeceb;border-radius:8px;padding:10px 14px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-  .chip{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;
-        font-size:13px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
-  .chip:hover{border-color:var(--accent);color:var(--accent)}
-  .chip b{font-weight:600;color:var(--muted);font-size:12px}
-  h3{margin:18px 0 8px;font-size:15px}
-  .hidden{display:none}
-  .ctx-focus{background:var(--accent-soft);border-radius:8px}
-  .facet-hero{background:linear-gradient(135deg,#203653,#4779b7);color:#fff;border:0}
-  .facet-hero .muted{color:#dbe8f7}
-  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:14px}
-  .stat-box{background:rgba(255,255,255,.13);border-radius:10px;padding:12px}
-  .stat-box b{display:block;font-size:22px;line-height:1.2}
-  .axis-card{border-left:4px solid var(--accent);padding-left:14px}
-  .axis-card h3{margin-top:0}
-  .bar{height:6px;background:#edf0f4;border-radius:99px;overflow:hidden;margin-top:7px}
-  .bar i{display:block;height:100%;background:linear-gradient(90deg,#4779b7,#8aaee0);border-radius:99px}
-  .unit-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:72px}
-</style>
-</head>
-<body>
-<header>
-  <h1>哲学大纲 · 知识库</h1>
-  <span class="sub" id="stat">加载中…</span>
-</header>
-
-<div class="wrap">
-  <div class="tabs">
-    <div class="tab on" data-t="ask">溯源回答</div>
-    <div class="tab" data-t="term">术语检索</div>
-    <div class="tab" data-t="quote">引文检索</div>
-    <div class="tab" data-t="facet">分面 / 体系</div>
-  </div>
-
-  <!-- 溯源回答：同一个入口，按问题自动选择点查询 / 范围查询 -->
-  <section id="p-ask">
-    <div class="card">
-      <div class="row">
-        <input type="text" id="q" placeholder="提问或主题，例如：什么是字头？／大他者是什么意思？／马克思在体系中的位置／谈谈精神分析">
-        <button id="ask-btn">提问</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <span class="muted">对整篇《哲学大纲》做全文检索，不限定单元或概念，避免概念内容被筛选截断。
-        定义式提问（「什么是字头」）走点查询，少而准、每条可回跳原文；主题式提问（「马克思在体系中的位置」）
-        走范围查询，高召回该主题的全部相关块并按数值单元聚合，回答深度与此前的专题提炼稿一致。
-        寒暄、系统询问等不适合检索的问题会被自动跳过。</span>
-      </div>
-    </div>
-    <div id="ask-out"></div>
-  </section>
-
-  <!-- 术语 -->
-  <section id="p-term" class="hidden">
-    <div class="card">
-      <div class="row">
-        <input type="text" id="t" placeholder="例如：大他者 / 客体小a / 场域论 / 存在者整体">
-        <button id="term-btn">检索</button>
-      </div>
-    </div>
-    <div id="term-out"></div>
-  </section>
-
-  <!-- 引文检索 -->
-  <section id="p-quote" class="hidden">
-    <div class="card">
-      <div class="row">
-        <select id="q-unit"><option value="">不限单元</option></select>
-        <select id="q-phil"><option value="">不限理论家</option></select>
-        <select id="q-speaker"><option value="">不限说话人</option></select>
-        <select id="q-concept"><option value="">不限概念</option></select>
-        <input type="text" id="q-kw" placeholder="引文关键词（可选）" style="flex:1">
-        <button id="quote-btn">检索</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <span class="muted">引文检索走元数据倒排 + 精确过滤，不做向量近似，结果可枚举、可核对。
-        「理论家」是**相关理论家**（引文所在段落谈到他即命中，召回高）；「说话人」只认有引述标记的
-        精确归因（覆盖低但不会张冠李戴）——要「某人的原话」请用说话人。</span>
-      </div>
-    </div>
-    <div id="quote-out"></div>
-  </section>
-
-  <!-- 分面 -->
-  <section id="p-facet" class="hidden">
-    <div id="facet-out"></div>
-  </section>
-</div>
-
-<script>
-const $ = s => document.querySelector(s);
-const esc = s => (s??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['ask','term','quote','facet'].forEach(k =>
-    $('#p-'+k).classList.toggle('hidden', k !== t.dataset.t));
-});
-
-function citeBlock(c){
-  const ph = (c.philosophers||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join('');
-  const cc = (c.concepts||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join('');
-  return `<div class="cite">
-    <div class="meta"><b>[${c.n??''}]</b> ${esc(c.citation)}</div>
-    <div style="margin-bottom:4px">${c.unit?`<span class="unit">${esc(c.unit)}</span> ${esc(c.unit_title||'')}`:''} ${ph}${cc}</div>
-    <div class="body">${esc(c.text)}</div>
-  </div>`;
-}
-
-async function jget(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
-
-// ---------- 问答 ----------
-function askQuestion(q){
-  $('#q').value = q;
-  document.querySelector('.tab[data-t="ask"]').click();
-  $('#ask-btn').click();
-  window.scrollTo({top:0,behavior:'smooth'});
-}
-
-$('#ask-btn').onclick = async () => {
-  const q = $('#q').value.trim(); if(!q) return;
-  const out = $('#ask-out');
-  // 计时逐秒刷新：重排是最贵的一步（CPU 上按候选数计费），让等待有进度感，
-  // 而不是让人以为模型又被重新加载了一遍。
-  const t0 = performance.now();
-  out.innerHTML = '<div class="card muted">检索并生成中…　<b id="ask-t">0.0s</b></div>';
-  const tick = setInterval(()=>{
-    const el = $('#ask-t'); if(el) el.textContent = ((performance.now()-t0)/1000).toFixed(1)+'s';
-  }, 100);
-  $('#ask-btn').disabled = true;
-  try{
-    const r = await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
-                                      body:JSON.stringify({question:q})}).then(r=>r.json());
-    if(r.skipped){
-      out.innerHTML = `<div class="card"><h3>已跳过检索</h3><pre class="ans">${esc(r.answer)}</pre>
-        <div class="muted">判定类别：${esc((r.gate||{}).category||'')}</div></div>`;
-      return;
-    }
-    // 范围查询：先给聚合概览（该主题在全书怎么分布），再给分节论述。
-    // 概览不是装饰——它是「主题集中度」的可核查依据，也是判断回答是否覆盖全面的入口。
-    let head = '';
-    if(r.strategy === 'theme' && r.theme){
-      const c = r.theme.counts;
-      const units = r.theme.units.slice(0,10).map(u =>
-        `<span class="unit">${esc(u.code||'前言')}</span> ${esc(u.title)} <span class="muted">${u.hits}块</span>`).join('　');
-      const lin = (r.theme.lineage||[]).slice(0,12).map(([n,k])=>`<span class="tag">${esc(n)} ${k}</span>`).join('');
-      head = `<div class="card"><h3>聚合概览 <span class="muted" style="font-weight:400">· 范围查询</span></h3>
-        <div class="muted">直接命中 ${c.direct} 块（元数据 ${c.meta} + 字面 ${c.literal}），占语料 ${(c.direct/c.corpus*100).toFixed(1)}%，分布于 ${c.unit_total} 个单元${r.theme.seed_mode?'；主题未登录词典，锚点由种子检索反推':''}</div>
-        <div style="margin-top:8px;line-height:2">${units}</div>
-        <div style="margin-top:8px">${lin}</div></div>`;
-    }
-    const tag = r.strategy === 'theme' ? '范围查询' : '点查询';
-    out.innerHTML = head
-      + `<div class="card"><h3>回答 <span class="muted" style="font-weight:400">· ${tag}</span></h3><pre class="ans">${esc(r.answer)}</pre></div>`
-      + `<div class="card"><h3>引用来源</h3>${(r.citations||[]).map(citeBlock).join('')}</div>`;
-  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-  finally{ clearInterval(tick); $('#ask-btn').disabled = false; }
-};
-$('#q').addEventListener('keydown', e => { if(e.key==='Enter') $('#ask-btn').click(); });
-
-// ---------- 术语 ----------
-$('#term-btn').onclick = async () => {
-  const t = $('#t').value.trim(); if(!t) return;
-  const out = $('#term-out'); out.innerHTML = '<div class="card muted">检索中…</div>';
-  try{
-    const r = await jget('/api/term?term=' + encodeURIComponent(t));
-    let h = '';
-    if(r.card) h += `<div class="card"><h3>${esc(r.card.name)}</h3>
-      <div class="muted">别名：${esc((r.card.aliases||[]).join('、')||'—')}　归属：${esc(r.card.philosopher)}（${esc(r.card.lifespan)}，${esc(r.card.era)}）</div>
-      <p>${esc(r.card.definition)}</p></div>`;
-    else h += `<div class="card muted">词典未收录「${esc(t)}」，以下为语义检索结果。</div>`;
-    h += `<div class="card"><h3>精确命中（${r.exact_total} 块）</h3>`
-       + r.exact_hits.map(c=>citeBlock({...c,n:''})).join('') + '</div>';
-    h += `<div class="card"><h3>语义补充命中</h3>`
-       + r.semantic_hits.map(c=>citeBlock({...c,n:'', citation:c.citation+'　score='+c.score})).join('') + '</div>';
-    out.innerHTML = h;
-  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-};
-$('#t').addEventListener('keydown', e => { if(e.key==='Enter') $('#term-btn').click(); });
-
-// ---------- 引文检索 ----------
-$('#quote-btn').onclick = async () => {
-  const p = new URLSearchParams();
-  if($('#q-unit').value) p.set('unit', $('#q-unit').value);
-  if($('#q-phil').value) p.set('philosopher', $('#q-phil').value);
-  if($('#q-speaker').value) p.set('speaker', $('#q-speaker').value);
-  if($('#q-concept').value) p.set('concept', $('#q-concept').value);
-  if($('#q-kw').value.trim()) p.set('keyword', $('#q-kw').value.trim());
-  p.set('limit', '30');
-  const out = $('#quote-out'); out.innerHTML = '<div class="card muted">检索中…</div>';
-  try{
-    const r = await jget('/api/quote?' + p.toString());
-    out.innerHTML = `<div class="card"><h3>命中 ${r.count} 条引文</h3>`
-      + (r.quotes.length ? r.quotes.map(q=>`<div class="quote">「${esc(q.text)}」<div class="meta muted" style="margin-top:6px">
-          —— ${esc(q.speaker||'未署名')}　<span class="unit">${esc(q.unit||'—')}</span> ${esc(q.unit_title||'')}
-          <br>${esc(q.citation)}</div></div>`).join('')
-        : '<div class="muted">无命中，试试放宽筛选条件。</div>')
-      + '</div>';
-  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-};
-$('#q-kw').addEventListener('keydown', e => { if(e.key==='Enter') $('#quote-btn').click(); });
-
-// ---------- 分面 / 体系 ----------
-function chipRow(items, onclick){
-  return `<div class="grid">` + items.map(([k,n])=>
-    `<div class="chip" data-k="${esc(k)}"><span>${esc(k)}</span><b>${n}</b></div>`).join('') + '</div>';
-}
-
-async function loadFacets(){
-  const [f, u] = await Promise.all([jget('/api/facets'), jget('/api/units')]);
-  const byVol = {};
-  u.forEach(x => { (byVol[x.volume] ||= []).push(x); });
-
-  // 引文检索的下拉：单元 / 理论家 / 说话人 / 概念
-  const fill = (sel, items, withCount) => {
-    const el = $(sel);
-    for(const it of items){
-      const [name, n] = Array.isArray(it) ? it : [it, null];
-      const label = (withCount && n != null) ? `${name}（${n}）` : name;
-      el.insertAdjacentHTML('beforeend', `<option value="${esc(name)}">${esc(label)}</option>`);
-    }
-  };
-  fill('#q-unit', u.map(x=>x.code));
-  fill('#q-phil', f.philosopher.slice(0, 80), true);
-  fill('#q-speaker', f.speaker || [], true);
-  fill('#q-concept', f.concept.slice(0, 120), true);
-
-  let h = `<div class="card facet-hero"><div class="muted">知识结构导航</div><h2 style="margin:4px 0 0">体系 · 卷与单元</h2>
-    <div class="stat-grid"><div class="stat-box"><b>${u.length}</b><span>数值单元</span></div>
-    <div class="stat-box"><b>${Object.keys(byVol).length}</b><span>卷</span></div>
-    <div class="stat-box"><b>${f.concept.length}</b><span>核心概念</span></div></div></div>`;
-  for(const v of Object.keys(byVol)){
-    h += `<div class="card"><div class="row"><h3 style="margin:0;flex:1">${esc(v)}</h3><span class="tag">${byVol[v].length} 个单元</span></div>
-      <div class="grid" style="margin-top:12px">`
-       + byVol[v].map(x=>`<div class="chip unit-card" data-unit="${esc(x.code)}"><span class="unit">${esc(x.code)}</span><span>${esc(x.title)}</span></div>`).join('')
-       + `</div>`;
-  }
-  h += `</div>`;
-
-  const names = {philosopher:'理论家', concept:'概念', era:'年代', school:'流派', speaker:'说话人', volume:'卷', unit:'数值单元'};
-  for(const k of ['philosopher','concept','era','school']){
-    const max = f[k][0]?.[1] || 1;
-    h += `<div class="card axis-card"><h3>${names[k]} <span class="muted">· ${f[k].length} 项</span></h3><div class="grid">`
-      + f[k].map(([name,n])=>`<div class="chip" data-k="${k}"><span>${esc(name)}<div class="bar"><i style="width:${Math.max(8,Math.round(n/max*100))}%"></i></div></span><b>${n}</b></div>`).join('')
-      + `</div></div>`;
-  }
-  $('#facet-out').innerHTML = h;
-
-  $('#facet-out').querySelectorAll('.chip').forEach(c => c.onclick = () => {
-    const unit = c.dataset.unit, k = c.dataset.k;
-    const spans = c.querySelectorAll('span');
-    const name = spans[0]?.textContent.trim() || '';
-    // 问答链路已不做筛选，因此这里改为「把卡片转成一个自然语言问题」直接提问，
-    // 既保留卡片到问答的联动，又不会因为筛选而截断概念内容。
-    if(unit){
-      const title = spans[1]?.textContent.trim() || '';
-      askQuestion(`${unit}${title ? ' ' + title : ''} 的核心内容是什么？`);
-    }
-    else if(k === 'philosopher') askQuestion(`${name} 的核心思想是什么？`);
-    else if(k === 'concept') askQuestion(`什么是${name}？`);
-  });
-}
-
-// ---------- 初始化 ----------
-(async function init(){
-  try{
-    const s = await jget('/api/stats');
-    const m = s.manifest;
-    const a = s.answer || {};
-    $('#stat').textContent = `《${m.doc_title}》　${m.chunk_count} 块 · ${m.unit_count} 单元 · ${m.embedding_backend}/${m.vector_dim} 维 · 生成 ${a.backend||''}${a.model?'/'+a.model:''}`;
-    loadFacets();
-  }catch(e){
-    $('#stat').textContent = '初始化失败：' + e.message;
-  }
-})();
-</script>
-</body>
-</html>
-"""

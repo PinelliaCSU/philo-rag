@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "philo-rag"
-version = "1.0.0"
+version = "1.1.0"
 description = "《哲学大纲》知识库：引用溯源问答、术语索引与语义检索、体系浏览"
 requires-python = ">=3.10"
 dependencies = [
@@ -26,3 +26,7 @@ philo-rag = "philo_rag.cli:main"
 
 [tool.setuptools]
 packages = ["philo_rag"]
+
+# 前端静态资源随包分发（纯 HTML/CSS/JS，无构建步骤）
+[tool.setuptools.package-data]
+philo_rag = ["web/*.html", "web/*.css", "web/*.js"]
