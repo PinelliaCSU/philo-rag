@@ -11,9 +11,9 @@
     GET  /api/facets          分面统计（筛选维度）
     GET  /api/units           体系目录（卷 → 单元）
     GET  /api/concepts        术语卡列表
-    POST /api/ask             引用溯源问答
-    GET  /api/theme?topic=    专题提炼（主题聚合检索 + 结构化生成）
+    POST /api/ask             溯源回答（自动判定点查询 / 范围查询；可传 strategy 强制）
     GET  /api/term?term=      术语索引与语义检索
+    GET  /api/quote?...       引文检索（按理论家 / 说话人 / 概念 / 单元精确过滤）
     GET  /api/context?...     取某块及其上下文（用于「跳转原文」）
 
 索引在进程启动时加载一次并常驻内存（BM25 与向量都在内存里，单机场景足够快）。
@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from .answer import answer as answer_fn
 from .index import Store
 from .lexicon import Lexicon
-from .retrieve import facet_summary, term_lookup
+from .retrieve import facet_summary, quote_payload, term_lookup
 
 _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": None}
 
@@ -42,12 +42,15 @@ _STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": 
 class AskRequest(BaseModel):
     """问答请求。
 
-    只收问题本身：溯源问答固定走**全文检索**，不再接受元数据筛选——
-    筛选会把承载概念定义的段落排除在候选池外，导致内容被截断。
+    只收问题本身（外加可选的 strategy）：溯源回答固定走**全文检索**，
+    不接受元数据筛选——筛选会把承载概念定义的段落排除在候选池外，导致内容被截断。
     需要按单元/理论家/概念浏览，请改用 /api/term 与分面接口。
+
+    strategy：auto（默认，按问题自动判定）| point（强制点查询）| theme（强制范围查询）。
     """
 
     question: str = Field(..., min_length=1)
+    strategy: str = Field("auto", pattern="^(auto|point|theme)$")
 
 
 def _load(cfg: dict) -> None:
@@ -131,7 +134,7 @@ def create_app(cfg: dict) -> FastAPI:
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
-        return answer_fn(store, lex, req.question, cfg)
+        return answer_fn(store, lex, req.question, cfg, strategy=req.strategy)
 
     @app.get("/api/term")
     def term(term: str = Query(..., min_length=1), limit: int = 8) -> dict:
@@ -148,13 +151,24 @@ def create_app(cfg: dict) -> FastAPI:
             ],
         }
 
-    @app.get("/api/theme")
-    def theme(topic: str = Query(..., min_length=1)) -> dict:
-        """专题提炼：主题聚合检索 + 结构化生成（与点式问答互补的另一条链路）。"""
-        from .answer import theme_answer
-
+    @app.get("/api/quote")
+    def quote(
+        philosopher: str | None = None,
+        speaker: str | None = None,
+        concept: str | None = None,
+        era: str | None = None,
+        school: str | None = None,
+        unit: str | None = None,
+        volume: str | None = None,
+        keyword: str | None = None,
+        limit: int = 30,
+    ) -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
-        return theme_answer(store, lex, topic, cfg)
+        return quote_payload(
+            store, lex, philosopher=philosopher, speaker=speaker, concept=concept,
+            era=era, school=school, unit=unit, volume=volume,
+            keyword=keyword, top_k=limit,
+        )
 
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
@@ -301,38 +315,27 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
 <div class="wrap">
   <div class="tabs">
-    <div class="tab on" data-t="ask">引用溯源问答</div>
-    <div class="tab" data-t="theme">专题提炼</div>
+    <div class="tab on" data-t="ask">溯源回答</div>
     <div class="tab" data-t="term">术语检索</div>
+    <div class="tab" data-t="quote">引文检索</div>
     <div class="tab" data-t="facet">分面 / 体系</div>
   </div>
 
-  <!-- 问答 -->
+  <!-- 溯源回答：同一个入口，按问题自动选择点查询 / 范围查询 -->
   <section id="p-ask">
     <div class="card">
       <div class="row">
-        <input type="text" id="q" placeholder="例如：什么是字头？四层分别规定什么？大他者是什么意思？">
+        <input type="text" id="q" placeholder="提问或主题，例如：什么是字头？／大他者是什么意思？／马克思在体系中的位置／谈谈精神分析">
         <button id="ask-btn">提问</button>
       </div>
       <div class="row" style="margin-top:10px">
-        <span class="muted">问答固定对整篇《哲学大纲》做全文检索，不限定单元或概念，避免概念内容被筛选截断。寒暄、系统询问等不适合检索的问题会被自动跳过。</span>
+        <span class="muted">对整篇《哲学大纲》做全文检索，不限定单元或概念，避免概念内容被筛选截断。
+        定义式提问（「什么是字头」）走点查询，少而准、每条可回跳原文；主题式提问（「马克思在体系中的位置」）
+        走范围查询，高召回该主题的全部相关块并按数值单元聚合，回答深度与此前的专题提炼稿一致。
+        寒暄、系统询问等不适合检索的问题会被自动跳过。</span>
       </div>
     </div>
     <div id="ask-out"></div>
-  </section>
-
-  <!-- 专题提炼 -->
-  <section id="p-theme" class="hidden">
-    <div class="card">
-      <div class="row">
-        <input type="text" id="th" placeholder="主题词，例如：马克思 / 黑格尔 / 精神分析 / 辩证法 / 拉康">
-        <button id="theme-btn">生成专题</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <span class="muted">专题提炼面向「某主题在全书的面貌」：高召回该主题的全部相关块，按数值单元聚合，再分节组织。与上面的点式问答互补——问答定位一句出处，专题给出整体结构。</span>
-      </div>
-    </div>
-    <div id="theme-out"></div>
   </section>
 
   <!-- 术语 -->
@@ -344,6 +347,26 @@ INDEX_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div id="term-out"></div>
+  </section>
+
+  <!-- 引文检索 -->
+  <section id="p-quote" class="hidden">
+    <div class="card">
+      <div class="row">
+        <select id="q-unit"><option value="">不限单元</option></select>
+        <select id="q-phil"><option value="">不限理论家</option></select>
+        <select id="q-speaker"><option value="">不限说话人</option></select>
+        <select id="q-concept"><option value="">不限概念</option></select>
+        <input type="text" id="q-kw" placeholder="引文关键词（可选）" style="flex:1">
+        <button id="quote-btn">检索</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="muted">引文检索走元数据倒排 + 精确过滤，不做向量近似，结果可枚举、可核对。
+        「理论家」是**相关理论家**（引文所在段落谈到他即命中，召回高）；「说话人」只认有引述标记的
+        精确归因（覆盖低但不会张冠李戴）——要「某人的原话」请用说话人。</span>
+      </div>
+    </div>
+    <div id="quote-out"></div>
   </section>
 
   <!-- 分面 -->
@@ -358,7 +381,7 @@ const esc = s => (s??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  ['ask','theme','term','facet'].forEach(k =>
+  ['ask','term','quote','facet'].forEach(k =>
     $('#p-'+k).classList.toggle('hidden', k !== t.dataset.t));
 });
 
@@ -401,38 +424,27 @@ $('#ask-btn').onclick = async () => {
         <div class="muted">判定类别：${esc((r.gate||{}).category||'')}</div></div>`;
       return;
     }
-    out.innerHTML = `<div class="card"><h3>回答</h3><pre class="ans">${esc(r.answer)}</pre></div>`
+    // 范围查询：先给聚合概览（该主题在全书怎么分布），再给分节论述。
+    // 概览不是装饰——它是「主题集中度」的可核查依据，也是判断回答是否覆盖全面的入口。
+    let head = '';
+    if(r.strategy === 'theme' && r.theme){
+      const c = r.theme.counts;
+      const units = r.theme.units.slice(0,10).map(u =>
+        `<span class="unit">${esc(u.code||'前言')}</span> ${esc(u.title)} <span class="muted">${u.hits}块</span>`).join('　');
+      const lin = (r.theme.lineage||[]).slice(0,12).map(([n,k])=>`<span class="tag">${esc(n)} ${k}</span>`).join('');
+      head = `<div class="card"><h3>聚合概览 <span class="muted" style="font-weight:400">· 范围查询</span></h3>
+        <div class="muted">直接命中 ${c.direct} 块（元数据 ${c.meta} + 字面 ${c.literal}），占语料 ${(c.direct/c.corpus*100).toFixed(1)}%，分布于 ${c.unit_total} 个单元${r.theme.seed_mode?'；主题未登录词典，锚点由种子检索反推':''}</div>
+        <div style="margin-top:8px;line-height:2">${units}</div>
+        <div style="margin-top:8px">${lin}</div></div>`;
+    }
+    const tag = r.strategy === 'theme' ? '范围查询' : '点查询';
+    out.innerHTML = head
+      + `<div class="card"><h3>回答 <span class="muted" style="font-weight:400">· ${tag}</span></h3><pre class="ans">${esc(r.answer)}</pre></div>`
       + `<div class="card"><h3>引用来源</h3>${(r.citations||[]).map(citeBlock).join('')}</div>`;
   }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
   finally{ clearInterval(tick); $('#ask-btn').disabled = false; }
 };
 $('#q').addEventListener('keydown', e => { if(e.key==='Enter') $('#ask-btn').click(); });
-
-// ---------- 专题提炼 ----------
-$('#theme-btn').onclick = async () => {
-  const t = $('#th').value.trim(); if(!t) return;
-  const out = $('#theme-out');
-  const t0 = performance.now();
-  out.innerHTML = '<div class="card muted">聚合检索并生成中…　<b id="th-t">0.0s</b></div>';
-  const tick = setInterval(()=>{
-    const el = $('#th-t'); if(el) el.textContent = ((performance.now()-t0)/1000).toFixed(1)+'s';
-  }, 100);
-  $('#theme-btn').disabled = true;
-  try{
-    const r = await jget('/api/theme?topic=' + encodeURIComponent(t));
-    const c = r.theme.counts;
-    const units = r.theme.units.map(u =>
-      `<span class="unit">${esc(u.code||'前言')}</span> ${esc(u.title)} <span class="muted">${u.hits}块/${u.density}</span>`).join('　');
-    const lin = (r.theme.lineage||[]).map(([n,k])=>`<span class="tag">${esc(n)} ${k}</span>`).join('');
-    out.innerHTML = `<div class="card"><h3>聚合概览</h3>
-        <div class="muted">直接命中 ${c.direct} 块（元数据 ${c.meta} + 字面 ${c.literal}），占语料 ${(c.direct/c.corpus*100).toFixed(1)}%，分布于 ${c.unit_total} 个单元${r.theme.seed_mode?'；主题未登录词典，锚点由种子检索反推':''}</div>
-        <div style="margin-top:8px;line-height:2">${units}</div>
-        <div style="margin-top:8px">${lin}</div></div>`
-      + `<div class="card"><h3>专题正文</h3><pre class="ans">${esc(r.answer)}</pre></div>`;
-  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-  finally{ clearInterval(tick); $('#theme-btn').disabled = false; }
-};
-$('#th').addEventListener('keydown', e => { if(e.key==='Enter') $('#theme-btn').click(); });
 
 // ---------- 术语 ----------
 $('#term-btn').onclick = async () => {
@@ -454,6 +466,28 @@ $('#term-btn').onclick = async () => {
 };
 $('#t').addEventListener('keydown', e => { if(e.key==='Enter') $('#term-btn').click(); });
 
+// ---------- 引文检索 ----------
+$('#quote-btn').onclick = async () => {
+  const p = new URLSearchParams();
+  if($('#q-unit').value) p.set('unit', $('#q-unit').value);
+  if($('#q-phil').value) p.set('philosopher', $('#q-phil').value);
+  if($('#q-speaker').value) p.set('speaker', $('#q-speaker').value);
+  if($('#q-concept').value) p.set('concept', $('#q-concept').value);
+  if($('#q-kw').value.trim()) p.set('keyword', $('#q-kw').value.trim());
+  p.set('limit', '30');
+  const out = $('#quote-out'); out.innerHTML = '<div class="card muted">检索中…</div>';
+  try{
+    const r = await jget('/api/quote?' + p.toString());
+    out.innerHTML = `<div class="card"><h3>命中 ${r.count} 条引文</h3>`
+      + (r.quotes.length ? r.quotes.map(q=>`<div class="quote">「${esc(q.text)}」<div class="meta muted" style="margin-top:6px">
+          —— ${esc(q.speaker||'未署名')}　<span class="unit">${esc(q.unit||'—')}</span> ${esc(q.unit_title||'')}
+          <br>${esc(q.citation)}</div></div>`).join('')
+        : '<div class="muted">无命中，试试放宽筛选条件。</div>')
+      + '</div>';
+  }catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+};
+$('#q-kw').addEventListener('keydown', e => { if(e.key==='Enter') $('#quote-btn').click(); });
+
 // ---------- 分面 / 体系 ----------
 function chipRow(items, onclick){
   return `<div class="grid">` + items.map(([k,n])=>
@@ -464,6 +498,20 @@ async function loadFacets(){
   const [f, u] = await Promise.all([jget('/api/facets'), jget('/api/units')]);
   const byVol = {};
   u.forEach(x => { (byVol[x.volume] ||= []).push(x); });
+
+  // 引文检索的下拉：单元 / 理论家 / 说话人 / 概念
+  const fill = (sel, items, withCount) => {
+    const el = $(sel);
+    for(const it of items){
+      const [name, n] = Array.isArray(it) ? it : [it, null];
+      const label = (withCount && n != null) ? `${name}（${n}）` : name;
+      el.insertAdjacentHTML('beforeend', `<option value="${esc(name)}">${esc(label)}</option>`);
+    }
+  };
+  fill('#q-unit', u.map(x=>x.code));
+  fill('#q-phil', f.philosopher.slice(0, 80), true);
+  fill('#q-speaker', f.speaker || [], true);
+  fill('#q-concept', f.concept.slice(0, 120), true);
 
   let h = `<div class="card facet-hero"><div class="muted">知识结构导航</div><h2 style="margin:4px 0 0">体系 · 卷与单元</h2>
     <div class="stat-grid"><div class="stat-box"><b>${u.length}</b><span>数值单元</span></div>

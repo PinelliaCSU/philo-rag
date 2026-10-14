@@ -63,7 +63,18 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
              "concepts", "start", "end", "page", "text"],
         )
     if fmt == "txt":
-        lines = [res["answer"], ""]
+        lines: list[str] = []
+        theme = res.get("theme")
+        if theme:
+            c = theme["counts"]
+            lines.append(f"[聚合] 直接命中 {c['direct']} 块（元数据 {c['meta']} + 字面 {c['literal']}），"
+                         f"覆盖 {c['unit_total']} 个数值单元")
+            top = theme.get("units", [])[:8]
+            if top:
+                lines.append("[密度] " + "、".join(
+                    f"{u['code'] or '前言'} {u['hits']}块" for u in top))
+            lines.append("")
+        lines += [res["answer"], ""]
         for c in res["citations"]:
             lines.append(f"[{c['n']}] {c['citation']}")
         return "\n".join(lines)
@@ -75,7 +86,28 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
         return (f"## 问题\n\n{res['question']}\n\n"
                 f"## 已跳过检索\n\n{res['answer']}\n\n"
                 f"> 判定类别：`{gate.get('category', '')}`\n")
-    out = [f"## 问题\n\n{res['question']}\n", f"## 回答\n\n{res['answer']}\n"]
+    out = [f"## 问题\n\n{res['question']}\n"]
+    theme = res.get("theme")
+    if theme:
+        # 范围查询：先给聚合概览（该主题在全书怎么分布），再给分节论述。
+        # 概览不是装饰——它正是「主题集中度」的可核查依据。
+        c = theme["counts"]
+        out.append("## 聚合概览\n")
+        out.append(
+            f"- 直接命中 **{c['direct']}** 块（元数据 {c['meta']} + 字面 {c['literal']}），"
+            f"占语料 {c['direct'] / max(c['corpus'], 1):.1%}；覆盖 **{c['unit_total']}** 个数值单元"
+        )
+        if theme.get("seed_mode"):
+            out.append("- 主题未登录词典，锚点由种子检索反推")
+        top = theme.get("units", [])[:8]
+        if top:
+            out.append("- 命中密度（前 8 单元）：" + "、".join(
+                f"`{u['code'] or '前言'}` {u['hits']} 块" for u in top))
+        lin = theme.get("lineage") or []
+        if lin:
+            out.append("- 共现理论家：" + "、".join(f"{n}（{k}）" for n, k in lin[:10]))
+        out.append("")
+    out.append(f"## 回答\n\n{res['answer']}\n")
     show = (cfg or {}).get("output", {}).get("show_citations", True)
     if show and res["citations"]:
         out.append("## 引用来源\n")
@@ -89,25 +121,6 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
                 f"  - 原文：{c['text'][:160].replace(chr(10), ' ')}…"
             )
     return "\n".join(out) + "\n"
-
-
-# --------------------------------------------------------------------------- #
-# 专题提炼
-# --------------------------------------------------------------------------- #
-def render_theme_output(res: dict[str, Any], fmt: str,
-                        cfg: dict[str, Any] | None = None) -> str:
-    """专题提炼结果。md/txt 直接输出生成层写好的成篇文档；
-    其余格式输出结构化字段，供下游消费。"""
-    if fmt == "json":
-        return _dump_json(res)
-    if fmt == "jsonl":
-        return json.dumps(res, ensure_ascii=False)
-    if fmt == "csv":
-        return _csv(res["theme"]["units"],
-                    ["code", "title", "volume", "hits", "total", "density"])
-    if fmt == "txt":
-        return res["answer"]
-    return res["answer"] + "\n"
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +255,6 @@ def render_eval(res: dict[str, Any], fmt: str) -> str:
 
 RENDERERS = {
     "answer": render_answer,
-    "theme": render_theme_output,
     "term": render_term,
     "quote": render_quote,
     "facets": render_facets,
@@ -256,7 +268,7 @@ def render(kind: str, result: dict[str, Any], fmt: str = "md",
     if fmt not in FORMATS:
         raise ValueError(f"不支持的输出格式：{fmt}（可选 {', '.join(FORMATS)}）")
     fn = RENDERERS[kind]
-    return fn(result, fmt, cfg) if kind in ("answer", "theme") else fn(result, fmt)
+    return fn(result, fmt, cfg) if kind == "answer" else fn(result, fmt)
 
 
 def write(kind: str, result: dict[str, Any], cfg: dict[str, Any],

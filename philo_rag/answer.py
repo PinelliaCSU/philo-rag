@@ -1,24 +1,31 @@
-"""生成层：引用溯源问答。
+"""生成层：引用溯源问答（单入口，内部按问题类型分策略）。
 
 三种后端：
   template —— 离线抽取式，不调用任何模型，直接给出带引用的原文片段（默认，用于自检与降级）
   ollama   —— 本地模型（qwen2.5 / llama3 等），数据不出本机
   api      —— 任意 OpenAI 兼容 /chat/completions 接口
 
-无论哪种后端，返回结构一致：answer + citations，前端可据 citations 跳转原文并高亮。
+无论哪种后端、哪种策略，返回结构一致：answer + citations，
+前端可据 citations 跳转原文并高亮。对使用者而言只有一个「溯源回答」入口。
 
-链路（两道前置关卡 + 一次全文检索 + 生成）：
+链路（两道前置关卡 + 类型判定 + 检索 + 生成）：
 
     问题 ─▶ ① 问题闸门 gate.check_question
               │ 不通过 → 直接返回 skipped，不触发任何检索
               ▼ 通过
             ①b 语义相关性格挡 gate.check_relevance（无锚点且与语料相似度过低 → skipped）
               ▼ 通过
-            ② 全文混合检索 hybrid_search（**不施加任何元数据筛选**）
+            ② 类型判定 classify_question ──┬─ point ─▶ hybrid_search（top-k 少而准）
+              │                            └─ theme ─▶ theme_search（高召回 + 按单元聚合）
               ▼
             ③ 证据筛选 / 上下文组装 ─▶ 生成 ─▶ answer + citations[]
 
-② 刻意不做筛选：早期版本允许 `--unit` / `--concept` 等条件先缩小候选池再检索，
+**两条策略回答的是同一个「溯源回答」版块的问题**，不是两个并列版块：
+  point —— 「什么是字头？」这类定位式提问：3—5 段、数百字，每条论断可回跳原文；
+  theme —— 「马克思在体系中的位置」这类主题式提问：按体系结构分节、数千字，
+           与离线时代的「专题提炼稿」同量级（召回数百块、覆盖数十个数值单元）。
+
+② 刻意不做元数据筛选：早期版本允许 `--unit` / `--concept` 等条件先缩小候选池再检索，
 结果是把「定义概念的段落」挡在池外——概念的定义句往往出现在前言、总纲或别的单元里，
 一旦按单元/概念过滤，召回反而被截断。所以问答链路固定为**整篇检索**：
 筛选只服务于浏览式检索（术语、引文、分面），不参与「问答要不要召回某块」的判断。
@@ -252,13 +259,101 @@ def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
     return data["choices"][0]["message"]["content"].strip()
 
 
+# --------------------------------------------------------------------------- #
+# 提问类型判定：点查询 vs 范围查询
+# --------------------------------------------------------------------------- #
+# 「溯源回答」是一个版块，但用户的问题有两类诉求，需要不同的召回规模与组织方式：
+#
+#   点查询    「什么是字头？」「大他者是什么意思？」「3-2 讲什么？」
+#             → 少而准（top-k 8），每条论断可回跳原文；回答 3—5 段、数百字。
+#   范围查询  「马克思在体系中的位置」「谈谈精神分析」「黑格尔的思想脉络」
+#             → 高召回（数百块），按数值单元聚合、恢复连续段落群；
+#             回答按体系结构分节、数千字，与离线时代的「专题提炼稿」同量级。
+#
+# 两者共用同一索引与同一返回结构（answer + citations），对用户是同一个入口，
+# 差别只体现在回答的深度与覆盖面。`ask --strategy auto|point|theme` 可显式指定。
+RE_THEME_QUERY = re.compile(
+    r"(思想|学说|理论体系|主题|脉络|谱系|全貌|综述|概览|概况|面貌|总体|整体|"
+    r"位置|地位|角色|分布|梳理|评述|论述|专题|系统地|全面地|"
+    r"谈谈|讲讲|说说|介绍一下|介绍下|展开说|展开讲)"
+)
+RE_POINT_QUERY = re.compile(
+    r"(什么是|何谓|何为|是什么意思|指的是什么|意指什么|是什么|指什么|"
+    r"在哪|哪里|何处|第几|哪一卷|哪个单元|谁|为什么|为何|如何|怎么)"
+)
+RE_UNIT_ONLY = re.compile(r"^\d+(?:-\d+){1,3}$")
+
+# 从提问里剥掉「提问句式 + 主题修饰词」，剩下的就是主题词本身
+RE_TOPIC_NOISE = re.compile(
+    r"(什么是|何谓|何为|是什么意思|指的是什么|意指什么|是什么|指什么|"
+    r"在[^，。？；]{0,10}?(?:中|里|内)的?(?:位置|地位|角色|分布)|"
+    r"思想|学说|理论体系|主题|脉络|谱系|全貌|综述|概览|概况|面貌|总体|整体|"
+    r"位置|地位|角色|分布|梳理|评述|论述|专题|系统地|全面地|"
+    r"谈谈|讲讲|说说|介绍一下|介绍下|介绍|展开说|展开讲|展开|"
+    r"如何|怎么|怎样|为什么|为何|哪些|什么|请|请问|的|了|吗|呢|吧)"
+)
+_TRIM = " \u3000?？。！!，,、：:；;…~～·-—"
+
+
+def _core_topic(question: str) -> str:
+    """剥掉提问句式与主题修饰词，留下核心实词短语。"""
+    return RE_TOPIC_NOISE.sub("", question or "").strip(_TRIM)
+
+
+def classify_question(question: str, lex: Lexicon | None = None) -> str:
+    """判定问题属于「点查询」还是「范围查询」。
+
+    顺序即优先级：先看有没有「主题式」措辞（思想 / 脉络 / 体系中的位置 / 谈谈 …），
+    再看是不是一个**裸主题词**（「马克思」「精神分析」——词典能锚定、又不含提问句式），
+    最后才落到点查询。定义式提问（「什么是 X」）始终走点查询，保证精确。
+    """
+    q = (question or "").strip()
+    if not q:
+        return "point"
+    if RE_THEME_QUERY.search(q):
+        return "theme"
+    core = _core_topic(q)
+    stripped = q.strip(_TRIM)
+    if core and core == stripped and not RE_POINT_QUERY.search(q):
+        # 整句就是一个主题词（无提问句式），例如「马克思」「精神分析」「辩证法」
+        if RE_UNIT_ONLY.match(core):
+            return "point"
+        if lex is not None and (lex.match_philosophers(core) or lex.match_concepts(core)):
+            return "theme"
+        if 2 <= len(core) <= 12:
+            return "theme"
+    return "point"
+
+
+def theme_topic(question: str, lex: Lexicon | None) -> str:
+    """从提问里抽出用于聚合的主题词。
+
+    优先取词典锚点（第一个出现的理论家 / 概念），这样「马克思在体系中的位置」
+    会被归一成「马克思」而不是整句；词典没有锚点时才退回「剥掉提问句式后的实词短语」。
+    """
+    if lex is not None:
+        phils = sorted(lex.iter_philosophers(question), key=lambda x: x[0])
+        if phils:
+            return phils[0][2]
+        concs = sorted(lex.iter_concepts(question), key=lambda x: x[0])
+        if concs:
+            return concs[0][2]
+    return _core_topic(question) or (question or "").strip()
+
+
 def answer(
     store: Store,
     lex: Lexicon,
     question: str,
     cfg: dict[str, Any],
+    strategy: str = "auto",
 ) -> dict[str, Any]:
-    """问答主链路：问题闸门 → 全文混合检索 → 组装上下文 → 生成 → 附引用。
+    """问答主链路：问题闸门 → 类型判定 → 检索 → 组装上下文 → 生成 → 附引用。
+
+    这是「溯源回答」的**唯一入口**。`strategy` 决定内部走哪条召回策略：
+      auto（默认）—— 由 classify_question 自动判定点查询 / 范围查询
+      point        —— 强制点查询（top-k 少而准）
+      theme        —— 强制范围查询（高召回 + 按单元聚合，输出与专题提炼同量级）
 
     注意：本链路**不接受元数据筛选**。筛选会先缩小候选池再检索，容易把承载
     「概念定义」的段落（常在前言 / 总纲 / 其他单元）排除在外，导致内容被截断。
@@ -270,6 +365,7 @@ def answer(
         return {
             "question": question,
             "backend": "gate",
+            "strategy": "gate",
             "skipped": True,
             "gate": gate,
             "answer": skip_answer(gate),
@@ -287,11 +383,22 @@ def answer(
             return {
                 "question": question,
                 "backend": "gate",
+                "strategy": "gate",
                 "skipped": True,
                 "gate": rel_gate,
                 "answer": skip_answer(rel_gate),
                 "citations": [],
             }
+
+    # ---- ② 类型判定：同一个入口，按问题诉求选择召回策略 ----
+    strat = (strategy or "auto").lower()
+    if strat not in ("point", "theme"):
+        strat = classify_question(question, lex)
+
+    if strat == "theme":
+        res = theme_answer(store, lex, theme_topic(question, lex), cfg)
+        res.update(question=question, strategy="theme", gate=gate, skipped=False)
+        return res
 
     backend = cfg["answer"].get("backend", "template")
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
@@ -345,6 +452,7 @@ def answer(
     return {
         "question": question,
         "backend": backend,
+        "strategy": "point",
         "skipped": False,
         "gate": gate,
         "answer": text,
@@ -353,14 +461,16 @@ def answer(
 
 
 # --------------------------------------------------------------------------- #
-# 专题提炼：结构化生成（与上面的点式问答互补）
+# 范围查询策略（溯源回答的 theme 分支）
 # --------------------------------------------------------------------------- #
-# 点式问答的提示词要求「3—5 段、不超过 700 字」——它是为**定位一句出处**设计的。
-# 主题提炼要的是相反的东西：按体系结构铺开、覆盖多个单元、保留长引文。
+# 点查询的提示词要求「3—5 段、不超过 700 字」——它是为**定位一句出处**设计的。
+# 主题式提问要的是相反的东西：按体系结构铺开、覆盖多个单元、保留长引文。
 # 因此单独一套提示词，长度约束差一个量级。
-THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_title}》撰写一份**主题专题提炼**。
+THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_title}》回答一个**主题式提问**。
 
-任务：围绕主题「{topic}」，依据下面**已按数值单元聚合好**的资料，写一份结构化的专题提炼——不是回答一个问题，而是给出该主题在全书中完整的思想面貌。
+提问：{topic}
+
+请依据下面**已按数值单元聚合好**的资料作答——不要只回答一句话，而要给出该主题在全书中完整的思想面貌。
 
 写作要求：
 1. 只使用「资料」中的内容，不引入资料之外的知识；每个论断后用 [单元编号] 或（p页码）标注来源；
@@ -378,7 +488,7 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
 
 主题：{topic}
 
-专题提炼："""
+回答："""
 
 
 def _theme_sentences(text: str, terms: list[str], max_chars: int) -> str:
@@ -415,11 +525,11 @@ def _theme_sentences(text: str, terms: list[str], max_chars: int) -> str:
 
 
 def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
-    """离线（template 后端）专题提炼：按单元分节，每节给主题句群 + 关键引文。
+    """离线（template 后端）范围查询：按单元分节，每节给主题句群 + 关键引文。
 
-    与点式问答的 `template_answer` 的区别：那里每块只取 1 句、最多 8 句；
+    与点查询的 `template_answer` 的区别：那里每块只取 1 句、最多 8 句；
     这里每个核心单元取一整段「主题句群」（约 300 字），并按体系结构分节，
-    产出的是有骨架的短篇专题，而不是 8 条孤立摘录。
+    产出的是有骨架的短篇论述，而不是 8 条孤立摘录。
     """
     t_cfg = cfg.get("theme", {}) or {}
     per_unit = int(t_cfg.get("answer_chars_per_unit", 340))
@@ -432,17 +542,15 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
     units = res["units"]
     core, ext = units[:core_n], units[core_n : core_n + ext_n]
 
-    lines: list[str] = [f"# 专题提炼：{res['topic']}", ""]
-    ratio = n["direct"] / max(n["corpus"], 1)
-    note = "；主题未登录词典，锚点由种子检索反推" if res["seed_mode"] else ""
-    lines.append(
-        f"> 全书直接命中 **{n['direct']}** 块（元数据 {n['meta']} + 字面 {n['literal']}）"
-        f"，占语料 {ratio:.1%}；分布于 **{n['unit_total']}** 个数值单元，语义补充 {n['extended']} 块{note}。"
-    )
-    lines.append("")
+    # 概览（命中块数 / 覆盖单元 / 语义补充）由输出层统一渲染（`render_answer` 的
+    # 「聚合概览」一节），正文里不再重复，直接从结构分节开始。
+    lines: list[str] = []
+    if res["seed_mode"]:
+        lines.append("> 该主题未登录词典，锚点由种子检索反推得到。")
+        lines.append("")
 
     # ---- 一、体系定位 ----
-    lines.append("## 一、体系定位")
+    lines.append("### 一、体系定位")
     if a["philosophers"]:
         lines.append(f"- 锚定理论家：{'、'.join(a['philosophers'])}")
     if a["concepts"]:
@@ -458,9 +566,9 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
 
     # ---- 二、核心单元 ----
     citations: list[dict[str, Any]] = []
-    lines.append(f"## 二、核心单元（按命中密度，前 {len(core)} 个）")
+    lines.append(f"### 二、核心单元（按命中密度，前 {len(core)} 个）")
     for u in core:
-        head = f"### {u['code']} {u['title']}" if u["code"] else f"### {u['title']}"
+        head = f"#### {u['code']} {u['title']}" if u["code"] else f"#### {u['title']}"
         lines.append(head)
         lines.append(f"*{u['volume'] or '—'}｜命中 {u['hits']}/{u['total']} 块（密度 {u['density']}）*")
         lines.append("")
@@ -498,7 +606,7 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
 
     # ---- 三、衍生与谱系 ----
     if res["lineage"] or ext:
-        lines.append("## 三、衍生与谱系")
+        lines.append("### 三、衍生与谱系")
         if res["lineage"]:
             lin = "、".join(f"{name}（{c}）" for name, c in res["lineage"][:12])
             lines.append(f"- 共现理论家（次数）：{lin}")
@@ -511,12 +619,12 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
         lines.append("")
 
     # ---- 四、引用来源 ----
-    lines.append("## 四、引用来源")
+    lines.append("### 四、引用来源")
     for c in citations:
         lines.append(f"- **[{c['n']}]** {c['citation']} · 字符 {c['start']}-{c['end']}")
     lines.append("")
     lines.append(
-        f"> 本专题由离线抽取式后端生成（`answer.backend=template`），共聚合 {n['direct']} 块证据、"
+        f"> 本回答由离线抽取式后端生成（`answer.backend=template`），共聚合 {n['direct']} 块证据、"
         f"上下文 {res['context_chars']} 字。接入本地模型（`backend: ollama`）可获得连贯的成篇论述。"
     )
     return "\n".join(lines), citations
@@ -525,7 +633,12 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
 def theme_answer(
     store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]
 ) -> dict[str, Any]:
-    """专题提炼主链路：主题聚合检索 → 结构化上下文 → 生成 → 附引用。"""
+    """范围查询策略：主题聚合检索 → 结构化上下文 → 生成 → 附引用。
+
+    这是 `answer()` 在判定为「范围查询」时调用的内部分支，返回结构与点查询一致
+    （answer + citations），另带 `theme` 字段给出聚合概览（锚点、单元分布、谱系）。
+    也可以直接用 `ask --strategy theme` 显式触发。
+    """
     from .theme import theme_search
 
     res = theme_search(store, lex, topic, cfg)
@@ -567,9 +680,13 @@ def theme_answer(
         ]
 
     return {
+        "question": topic,
         "topic": topic,
         "kind": "theme",
         "backend": backend,
+        "strategy": "theme",
+        "skipped": False,
+        "gate": None,
         "answer": text,
         "citations": citations,
         "theme": {

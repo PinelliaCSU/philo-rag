@@ -1,10 +1,15 @@
 """命令行入口。
 
     prepare  采集清洗语料        build   构建索引
-    ask      引用溯源问答        theme   专题提炼（主题综合）
-    term     术语索引与语义检索  facets  分面统计与体系浏览
+    ask      溯源回答（自动判定点查询 / 范围查询）
+    term     术语索引与语义检索  quote   引文检索
+    facets   分面统计与体系浏览
     eval     检索质量评测        stats   索引概览
     serve    Web 服务            demo    一键自检
+
+`ask` 是唯一的问答入口：内部按问题诉求自动选择召回策略——
+「什么是字头？」走点查询（少而准），「马克思在体系中的位置」走范围查询
+（高召回 + 按单元聚合，输出与专题提炼同量级）。需要强制时用 `--strategy`。
 """
 from __future__ import annotations
 
@@ -26,7 +31,7 @@ from . import output as output_mod
 from .answer import answer as answer_fn
 from .index import Store
 from .lexicon import Lexicon
-from .retrieve import facet_summary, term_lookup
+from .retrieve import facet_summary, quote_payload, term_lookup
 
 # 相对路径字段 → 相对 config.yaml 所在目录解析
 _PATH_KEYS = [
@@ -140,23 +145,26 @@ def cmd_ask(cfg: dict, args: argparse.Namespace) -> None:
     if args.no_gate:
         # 调试/对比用：临时关闭问题闸门，强制所有问题进入检索
         cfg.setdefault("gate", {})["enabled"] = False
-    res = answer_fn(store, lex, args.question, cfg)
+    res = answer_fn(store, lex, args.question, cfg, strategy=args.strategy)
     _emit("answer", res, args, cfg)
-
-
-def cmd_theme(cfg: dict, args: argparse.Namespace) -> None:
-    """专题提炼：主题聚合检索 + 结构化生成（与点式问答互补的另一条链路）。"""
-    from .answer import theme_answer
-
-    store, lex = open_store(cfg)
-    res = theme_answer(store, lex, args.topic, cfg)
-    _emit("theme", res, args, cfg)
 
 
 def cmd_term(cfg: dict, args: argparse.Namespace) -> None:
     store, lex = open_store(cfg)
     res = term_lookup(store, lex, args.term, cfg, top_k=args.limit)
     _emit("term", res, args, cfg)
+
+
+def cmd_quote(cfg: dict, args: argparse.Namespace) -> None:
+    """引文检索：元数据倒排 + 精确过滤，结果可枚举、可核对。"""
+    store, lex = open_store(cfg)
+    res = quote_payload(
+        store, lex,
+        philosopher=args.philosopher, concept=args.concept, era=args.era,
+        school=args.school, unit=args.unit, volume=args.volume,
+        speaker=args.speaker, keyword=args.keyword, top_k=args.limit,
+    )
+    _emit("quote", res, args, cfg)
 
 
 def cmd_facets(cfg: dict, args: argparse.Namespace) -> None:
@@ -203,10 +211,21 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
         print(f"  {k:20s} {store.manifest[k]}")
 
     for q in ["什么是字头？", "四层分别是什么？", "1-1 科学实在论的核心是什么？"]:
-        _rule(f"问答：{q}")
+        _rule(f"点查询：{q}")
         res = answer_fn(store, lex, q, cfg)
-        print(res["answer"])
+        print(f"  [策略 {res['strategy']}] 回答 {len(res['answer'])} 字")
+        print(res["answer"].splitlines()[0] if res["answer"] else "")
         print("  来源：" + " | ".join(c["citation"] for c in res["citations"][:2]))
+
+    for q in ["马克思在体系中的位置", "谈谈精神分析"]:
+        _rule(f"范围查询：{q}")
+        res = answer_fn(store, lex, q, cfg)
+        c = res["theme"]["counts"]
+        print(f"  [策略 {res['strategy']}] 回答 {len(res['answer'])} 字　锚点 {res['theme']['anchors']}")
+        print(f"  直接命中 {c['direct']} 块（占语料 {c['direct']/c['corpus']:.1%}），"
+              f"{c['unit_total']} 个单元")
+        top = res["theme"]["units"][:3]
+        print("  核心单元：" + "　".join(f"{u['code']} {u['title']}（{u['hits']}块）" for u in top))
 
     for t in ["大他者", "客体小a", "场域论"]:
         _rule(f"术语：{t}")
@@ -216,17 +235,6 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
             print(f"  {card['name']}（{card['philosopher']}，{card['lifespan']}）：{card['definition']}")
         print(f"  精确命中 {res['exact_total']} 块")
 
-    from .answer import theme_answer
-
-    for topic in ["马克思", "精神分析"]:
-        _rule(f"专题提炼：{topic}")
-        res = theme_answer(store, lex, topic, cfg)
-        c = res["theme"]["counts"]
-        print(f"  直接命中 {c['direct']} 块（占语料 {c['direct']/c['corpus']:.1%}）"
-              f"，{c['unit_total']} 个单元，锚点 {res['theme']['anchors']}")
-        top = res["theme"]["units"][:3]
-        print("  核心单元：" + "　".join(f"{u['code']} {u['title']}（{u['hits']}块）" for u in top))
-
     _rule("自检通过")
 
 
@@ -234,6 +242,16 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--format", choices=output_mod.FORMATS, help="输出格式")
     p.add_argument("--out", help="输出到文件（不指定则打印到终端）")
+
+
+def _add_filters(p: argparse.ArgumentParser) -> None:
+    """引文检索的元数据筛选维度（与 facets 的分面一一对应）。"""
+    p.add_argument("--philosopher", action="append", help="限定相关理论家（含语境），可重复")
+    p.add_argument("--era", help="限定年代")
+    p.add_argument("--concept", help="限定概念")
+    p.add_argument("--school", help="限定流派")
+    p.add_argument("--unit", help="限定数值单元编号（如 1-1 / 3-2-1，或字头 1）")
+    p.add_argument("--volume", help="限定卷（如 '第 1 卷 实在论'）")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -246,23 +264,30 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("build", help="构建索引").set_defaults(func=cmd_build)
     sub.add_parser("stats", help="索引概览").set_defaults(func=cmd_stats)
 
-    p_ask = sub.add_parser("ask", help="引用溯源问答（全文检索）")
+    p_ask = sub.add_parser("ask", help="溯源回答（自动判定点查询 / 范围查询）")
     p_ask.add_argument("question")
+    p_ask.add_argument("--strategy", choices=["auto", "point", "theme"], default="auto",
+                       help="召回策略：auto 自动判定（默认）｜point 强制点查询｜"
+                            "theme 强制范围查询（主题综合）")
     p_ask.add_argument("--no-gate", action="store_true",
                        help="关闭问题闸门，强制所有问题进入检索（调试用）")
     _add_common(p_ask)
     p_ask.set_defaults(func=cmd_ask)
-
-    p_theme = sub.add_parser("theme", help="专题提炼（主题聚合检索 + 结构化生成）")
-    p_theme.add_argument("topic", help="主题词，如「马克思」「黑格尔」「精神分析」")
-    _add_common(p_theme)
-    p_theme.set_defaults(func=cmd_theme)
 
     p_term = sub.add_parser("term", help="术语索引与语义检索")
     p_term.add_argument("term")
     p_term.add_argument("--limit", type=int, default=8)
     _add_common(p_term)
     p_term.set_defaults(func=cmd_term)
+
+    p_quote = sub.add_parser("quote", help="引文检索（元数据倒排 + 精确过滤）")
+    _add_filters(p_quote)
+    p_quote.add_argument("--speaker", action="append",
+                         help="限定说话人（只认有引述标记的精确归因），可重复")
+    p_quote.add_argument("--keyword", help="引文正文关键词")
+    p_quote.add_argument("--limit", type=int, default=20)
+    _add_common(p_quote)
+    p_quote.set_defaults(func=cmd_quote)
 
     p_facets = sub.add_parser("facets", help="分面统计")
     _add_common(p_facets)
