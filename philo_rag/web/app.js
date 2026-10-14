@@ -191,17 +191,106 @@ async function doAsk(q, strategy) {
   const tick = startTimer($('#ask-t'));
   $('#ask-btn').disabled = true;
   try {
-    const r = await jpost('/api/ask', { question: q, strategy: strat });
-    state.ask = r;
-    state.citePage = 0;
-    renderAnswer(r);
-    renderCitations(r);
+    // 流式 SSE：先收到 meta（引用面板就绪），再逐字追加回答正文
+    const r = await fetch('/api/ask_stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, strategy: strat }),
+    });
+    if (!r.ok) throw new Error(await errText(r));
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let meta = null;
+    let answerText = '';
+    let answerEl = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE 事件以 \n\n 分隔
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = block.trim();
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (event.type === 'meta') {
+          meta = event;
+          answerText = '';
+          state.citePage = 0;
+          state.ask = event;
+          // 构建回答框架：先空 pre，后续 delta 逐字追加
+          renderAnswerSkeleton(event);
+          renderCitations(event);
+          answerEl = $('#ask-answer-text');
+        } else if (event.type === 'delta') {
+          answerText += event.text;
+          if (answerEl) {
+            answerEl.textContent = answerText;
+            answerEl.scrollTop = answerEl.scrollHeight;
+          }
+        } else if (event.type === 'done') {
+          // 最终清理（去掉模型可能输出的来源行）
+          if (meta) {
+            meta.answer = event.answer;
+            state.ask = { ...meta, answer: event.answer };
+            renderAnswer(state.ask);
+          }
+        } else if (event.type === 'error') {
+          out.innerHTML = `<div class="err">${esc(event.detail)}</div>`;
+        }
+      }
+    }
+
+    // 如果没有收到任何事件（如网关跳过），回退到旧接口
+    if (!meta) {
+      const r2 = await jpost('/api/ask', { question: q, strategy: strat });
+      state.ask = r2;
+      state.citePage = 0;
+      renderAnswer(r2);
+      renderCitations(r2);
+    }
   } catch (e) {
     out.innerHTML = `<div class="err">${esc(e.message)}</div>`;
   } finally {
     clearInterval(tick);
     $('#ask-btn').disabled = false;
   }
+}
+
+/* 流式专用：先搭骨架，delta 逐字追加 */
+function renderAnswerSkeleton(r) {
+  const out = $('#ask-out');
+  if (r.skipped) {
+    out.innerHTML = `<div class="card"><h3>已跳过检索</h3>
+      <pre class="ans">${esc(r.answer || '')}</pre>
+      <div class="muted">判定类别：${esc((r.gate || {}).category || '')}</div></div>`;
+    return;
+  }
+  let h = '';
+  if (r.strategy === 'theme' && r.theme) {
+    const c = r.theme.counts;
+    const units = r.theme.units.slice(0, 10).map(u =>
+      `<span class="unit">${esc(u.code || '前言')}</span> ${esc(u.title)} <span class="muted">${u.hits}块</span>`
+    ).join('　');
+    const lin = (r.theme.lineage || []).slice(0, 12)
+      .map(([n, k]) => `<span class="tag">${esc(n)} ${k}</span>`).join('');
+    h += `<div class="card"><h3>聚合概览 <span class="muted heading-note">· 范围查询</span></h3>
+      <div class="muted">直接命中 ${c.direct} 块（元数据 ${c.meta} + 字面 ${c.literal}），占语料 ${(c.direct / c.corpus * 100).toFixed(1)}%，分布于 ${c.unit_total} 个单元${r.theme.seed_mode ? '；主题未登录词典，锚点由种子检索反推' : ''}</div>
+      <div class="overview-units">${units}</div>
+      <div class="overview-lineage">${lin}</div></div>`;
+  }
+  const tag = r.skipped ? '已跳过' : (r.strategy === 'theme' ? '范围查询' : '点查询');
+  h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${tag}</span></h3>
+    <pre class="ans" id="ask-answer-text"></pre></div>`;
+  out.innerHTML = h;
+  out.scrollTop = 0;
 }
 
 function askQuestion(q, strategy) {

@@ -85,6 +85,8 @@ answer:
   # （.env 已在 .gitignore 中，不会被提交）；也可直接把 key 填在这里。
   api_key: ${DASHSCOPE_API_KEY}
   api_model: qwen-plus      # 百炼模型名：qwen-plus / qwen-max / qwen-turbo …
+  api_model_point: qwen-turbo  # 点查询专用（3-5 段数百字，turbo 更快且够用）
+  api_model_theme: qwen-plus   # 范围查询专用（1500-4000 字长文，需更强模型）
   api_max_tokens: 8192      # 输出上限；范围查询要写 1500–4000 字，必须给足
   api_timeout: 300          # 单次请求超时（秒）；范围查询上下文大、耗时较长
   api_retries: 2            # 429 / 5xx / 网络错误的自动退避重试次数
@@ -115,8 +117,10 @@ theme:
   group_gap: 3              # 块序差 ≤ 此值视为连续，合并为一个段落群
   max_units: 12             # 参与组装的单元数上限（按命中数排序）
   groups_per_unit: 3        # 每个单元取几个段落群
-  max_group_chars: 1500     # 单个段落群进入上下文的字符上限
-  context_budget: 24000     # 上下文总字符预算（喂给 LLM 用；离线后端不消耗）
+  max_group_chars: 1200     # 单个段落群进入上下文的字符上限
+  context_budget: 16000     # 上下文总字符预算（喂给 LLM 用；离线后端不消耗）
+                            # 从 24000 降到 16000：段落群先经 _theme_sentences 筛选去掉无关句，
+                            # 同等信息密度下输入 token 更少，范围查询生成快 20-30%
   core_units: 6             # 离线后端：详写的核心单元数
   extended_units: 6         # 离线后端：简述的衍生单元数
   answer_chars_per_unit: 340  # 离线后端：每个核心单元的主题句群字符上限

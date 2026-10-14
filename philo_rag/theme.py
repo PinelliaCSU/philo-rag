@@ -40,6 +40,30 @@ from .schema import Chunk
 UNKNOWN_UNIT = "（前言·体例·总纲）"
 
 
+def _filter_relevant_sentences(text: str, terms: list[str], max_chars: int) -> str:
+    """从段落群中保留含主题词的句子，去掉无关句，提高上下文信息密度。
+
+    与 answer.py 的 _theme_sentences 不同：这里不做打分排序，只做保留/丢弃
+    二值判断，保持原文顺序。没有命中任何主题词时退回截断。
+    """
+    import re
+
+    sents = re.findall(r"[^。！？；\n]+[。！？；]?", text)
+    sents = [s.strip() for s in sents if len(s.strip()) >= 8]
+    picked: list[str] = []
+    used = 0
+    for s in sents:
+        if used + len(s) > max_chars and picked:
+            break
+        # 保留含主题词的句子，或定义/转折标记句
+        if any(t in s for t in terms) or any(
+            m in s for m in ("即", "是指", "意味着", "所谓", "因为", "因此", "但是", "然而")
+        ):
+            picked.append(s)
+            used += len(s)
+    return "".join(picked) if picked else text[:max_chars].rstrip() + "……"
+
+
 # --------------------------------------------------------------------------- #
 # 主题锚定
 # --------------------------------------------------------------------------- #
@@ -238,21 +262,29 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
             ec[e] += 1
 
     # 组装上下文（供生成层；按单元分节，带结构标题）
+    # 每个段落群先经句子级筛选——去掉不含主题词的无关句，同等字符预算下
+    # 信息密度更高，LLM 输入 token 更少、生成更快。
     context_parts: list[str] = []
     used = 0
+    budget = int(t_cfg.get("context_budget", 16000))
+    # 主题词集合，用于句子筛选
+    topic_terms = [t for t in [topic, *phils, *concs] if t]
     for u in kept:
         head = f"### 单元 {u['code']} {u['title']}｜{u['volume']}｜命中 {u['hits']} 块"
         context_parts.append(head)
         used += len(head)
         for g in u["groups"][:groups_per_unit]:
             text = g["text"]
-            if len(text) > max_group_chars:
+            # 句子级筛选：保留含主题词的句子，去掉无关句
+            if topic_terms and len(text) > 400:
+                text = _filter_relevant_sentences(text, topic_terms, max_group_chars)
+            elif len(text) > max_group_chars:
                 text = text[:max_group_chars].rstrip() + "……"
             context_parts.append(f"（p{g['page']}）{text}")
             used += len(text)
-            if used > int(t_cfg.get("context_budget", 24000)):
+            if used > budget:
                 break
-        if used > int(t_cfg.get("context_budget", 24000)):
+        if used > budget:
             break
 
     return {

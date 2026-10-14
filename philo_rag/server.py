@@ -29,10 +29,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .answer import answer as answer_fn
+from .answer import answer as answer_fn, answer_stream as answer_stream_fn
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import facet_summary, quote_payload, term_lookup
@@ -178,6 +178,22 @@ def create_app(cfg: dict) -> FastAPI:
     def ask(req: AskRequest) -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
         return answer_fn(store, lex, req.question, cfg, strategy=req.strategy)
+
+    @app.post("/api/ask_stream")
+    async def ask_stream(req: AskRequest):
+        """SSE 流式问答：先发 meta 事件（含引用），再逐块发 delta 事件，最后发 done。
+
+        前端用 EventSource 或 fetch + ReadableStream 消费，收到 meta 后立即渲染
+        引用面板，收到 delta 后逐字追加回答正文——本地检索完成后即可开始输出。
+        """
+        import json as _json
+
+        async def event_gen():
+            store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+            for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy):
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(event_gen(), media_type="text/event-stream")
 
     @app.get("/api/term")
     def term(term: str = Query(..., min_length=1), limit: int = 8) -> dict:

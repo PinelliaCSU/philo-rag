@@ -38,13 +38,19 @@ import re
 import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Generator
 
 from .gate import check_question, check_relevance, skip_answer
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import _definition_terms, hybrid_search
 from .schema import Chunk
+
+# ---- 回答级 LRU 缓存 ----
+# (question, strategy) → answer 结果。命中时跳过检索与 LLM 生成，直接返回。
+# 对「卡片联动」场景（用户在术语卡之间跳转、反复查看相近问题）收益极大。
+_ANSWER_CACHE: collections.OrderedDict[tuple[str, str], dict[str, Any]] = collections.OrderedDict()
+_ANSWER_CACHE_MAX = 64
 
 PROMPT_TEMPLATE = """你是一位严谨的哲学文献助手，正在为读者讲解《哲学大纲》一书。
 
@@ -254,18 +260,21 @@ def _api_error_detail(exc: urllib.error.HTTPError) -> str:
     return f"HTTP {exc.code} {exc.reason}" + (f"：{body[:400]}" if body else "")
 
 
-def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
-    """调用任意 OpenAI 兼容 /chat/completions 接口（默认阿里云百炼 DashScope）。
+def _resolve_api_model(cfg: dict[str, Any], strategy: str = "point") -> str:
+    """按策略选择模型：点查询优先用 api_model_point（更快），范围查询用 api_model_theme。
 
-    与 ollama 后端的差别只在传输层：提示词、上下文、返回结构完全一致，因此点查询与
-    范围查询两条策略都能直接切到云端，检索链路一行都不用改。
-
-    三个工程要点：
-      * `max_tokens` 必须显式给足——范围查询要求 1500—4000 字，默认输出上限会把长文
-        拦腰截断；
-      * 429 / 5xx 与网络抖动自动退避重试，不让偶发失败废掉整次提问；
-      * HTTP 错误体原样回带，直接看到「密钥错误 / 模型未开通 / 额度不足」。
+    未配置专用模型时退回通用 api_model / model。
     """
+    a_cfg = cfg.get("answer", {}) or {}
+    if strategy == "theme":
+        model = a_cfg.get("api_model_theme") or a_cfg.get("api_model") or a_cfg.get("model", "qwen-plus")
+    else:
+        model = a_cfg.get("api_model_point") or a_cfg.get("api_model") or a_cfg.get("model", "qwen-plus")
+    return model
+
+
+def _build_api_payload(prompt: str, cfg: dict[str, Any], strategy: str = "point", stream: bool = False) -> tuple[str, dict, dict]:
+    """构造 OpenAI 兼容请求的 URL / payload / headers，供流式与非流式共用。"""
     a_cfg = cfg["answer"]
     base = str(a_cfg.get("api_base", "") or "").rstrip("/")
     if not base:
@@ -281,13 +290,12 @@ def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
             "并让 config.yaml 保留 api_key: ${DASHSCOPE_API_KEY}；\n"
             "  · 或直接把 key 填进 config.yaml 的 answer.api_key。"
         )
-
-    model = a_cfg.get("api_model") or a_cfg.get("model", "qwen-plus")
+    model = _resolve_api_model(cfg, strategy)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": float(a_cfg.get("temperature", 0.2)),
-        "stream": False,
+        "stream": stream,
     }
     if a_cfg.get("api_max_tokens"):
         payload["max_tokens"] = int(a_cfg["api_max_tokens"])
@@ -297,8 +305,26 @@ def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
 
     url = f"{base}/chat/completions"
     headers = {"Authorization": f"Bearer {key}"}
+    return url, payload, headers
+
+
+def api_answer(prompt: str, cfg: dict[str, Any], strategy: str = "point") -> str:
+    """调用任意 OpenAI 兼容 /chat/completions 接口（默认阿里云百炼 DashScope）。
+
+    与 ollama 后端的差别只在传输层：提示词、上下文、返回结构完全一致，因此点查询与
+    范围查询两条策略都能直接切到云端，检索链路一行都不用改。
+
+    三个工程要点：
+      * `max_tokens` 必须显式给足——范围查询要求 1500—4000 字，默认输出上限会把长文
+        拦腰截断；
+      * 429 / 5xx 与网络抖动自动退避重试，不让偶发失败废掉整次提问；
+      * HTTP 错误体原样回带，直接看到「密钥错误 / 模型未开通 / 额度不足」。
+    """
+    a_cfg = cfg["answer"]
+    url, payload, headers = _build_api_payload(prompt, cfg, strategy=strategy, stream=False)
     timeout = int(a_cfg.get("api_timeout", 180))
     retries = max(0, int(a_cfg.get("api_retries", 2)))
+    model = payload["model"]
 
     last: Exception | None = None
     for attempt in range(retries + 1):
@@ -315,7 +341,7 @@ def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
                 continue
             raise last from exc
         except urllib.error.URLError as exc:
-            last = RuntimeError(f"无法连接 {base}：{exc.reason}")
+            last = RuntimeError(f"无法连接 {url.rsplit('/', 2)[0]}：{exc.reason}")
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
                 continue
@@ -323,7 +349,61 @@ def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
     raise last if last else RuntimeError("API 调用失败")
 
 
-def generate_text(prompt: str, cfg: dict[str, Any]) -> str:
+def api_answer_stream(prompt: str, cfg: dict[str, Any], strategy: str = "point"):
+    """流式调用 OpenAI 兼容接口，逐块 yield 文本增量。
+
+    用 SSE 协议读取 `stream=True` 的响应体，每个 `data:` 行是一个 JSON chunk，
+    其中 `choices[0].delta.content` 是文本增量。遇到 `[DONE]` 结束。
+
+    首个 chunk 到达后即可开始输出——本地检索完成后用户几乎无感等待。
+    """
+    a_cfg = cfg["answer"]
+    url, payload, headers = _build_api_payload(prompt, cfg, strategy=strategy, stream=True)
+    timeout = int(a_cfg.get("api_timeout", 180))
+    model = payload["model"]
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"{model} 调用失败：{_api_error_detail(exc)}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"无法连接 {url.rsplit('/', 2)[0]}：{exc.reason}") from exc
+
+    buf = b""
+    with resp:
+        for raw in resp:
+            buf += raw
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(b"data: "):
+                    data_str = line[6:]
+                elif line.startswith(b"data:"):
+                    data_str = line[5:]
+                else:
+                    continue
+                if data_str.strip() == b"[DONE]":
+                    return
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
+
+
+def generate_text(prompt: str, cfg: dict[str, Any], strategy: str = "point") -> str:
     """按配置选择后端，把提示词送出去拿回文本。
 
     供连通性探测（`demo` / `scripts/check_api.py`）复用，避免各处重复判断后端。
@@ -332,7 +412,7 @@ def generate_text(prompt: str, cfg: dict[str, Any]) -> str:
     if backend == "ollama":
         return ollama_answer(prompt, cfg)
     if backend == "api":
-        return api_answer(prompt, cfg)
+        return api_answer(prompt, cfg, strategy=strategy)
     raise ValueError(f"后端 {backend} 不是生成式后端（template 为离线抽取式，无需调用）")
 
 
@@ -432,14 +512,25 @@ def answer(
       point        —— 强制点查询（top-k 少而准）
       theme        —— 强制范围查询（高召回 + 按单元聚合，输出与专题提炼同量级）
 
+    回答结果进 LRU 缓存：(question, strategy) 命中时直接返回，跳过检索与 LLM 生成。
+
     注意：本链路**不接受元数据筛选**。筛选会先缩小候选池再检索，容易把承载
     「概念定义」的段落（常在前言 / 总纲 / 其他单元）排除在外，导致内容被截断。
     需要按单元 / 理论家 / 概念浏览时，请走 `term_lookup` / `quote_search` / 分面统计。
     """
+    # ---- ⓪ LRU 缓存命中检查 ----
+    q_norm = (question or "").strip()
+    s_norm = (strategy or "auto").lower()
+    cache_key = (q_norm, s_norm)
+    cached = _ANSWER_CACHE.get(cache_key)
+    if cached is not None:
+        _ANSWER_CACHE.move_to_end(cache_key)
+        return {**cached, "_cached": True}
+
     # ---- ① 问题闸门：不适合检索的问题在此终止，不进检索流程 ----
     gate = check_question(question, lex, cfg)
     if not gate["ok"]:
-        return {
+        result = {
             "question": question,
             "backend": "gate",
             "strategy": "gate",
@@ -448,6 +539,11 @@ def answer(
             "answer": skip_answer(gate),
             "citations": [],
         }
+        _ANSWER_CACHE[cache_key] = result
+        _ANSWER_CACHE.move_to_end(cache_key)
+        while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
+            _ANSWER_CACHE.popitem(last=False)
+        return result
 
     # ---- ①b 语义相关性格挡：无锚点、又和语料相似度过低的问题也直接跳过 ----
     # 硬编码拦截模式（寒暄 / 实时信息 …）覆盖不了所有垃圾输入，这一层用
@@ -457,7 +553,7 @@ def answer(
     if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
         rel_gate = check_relevance(store, question, cfg)
         if not rel_gate["ok"]:
-            return {
+            result = {
                 "question": question,
                 "backend": "gate",
                 "strategy": "gate",
@@ -466,6 +562,11 @@ def answer(
                 "answer": skip_answer(rel_gate),
                 "citations": [],
             }
+            _ANSWER_CACHE[cache_key] = result
+            _ANSWER_CACHE.move_to_end(cache_key)
+            while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
+                _ANSWER_CACHE.popitem(last=False)
+            return result
 
     # ---- ② 类型判定：同一个入口，按问题诉求选择召回策略 ----
     strat = (strategy or "auto").lower()
@@ -475,6 +576,10 @@ def answer(
     if strat == "theme":
         res = theme_answer(store, lex, theme_topic(question, lex), cfg)
         res.update(question=question, strategy="theme", gate=gate, skipped=False)
+        _ANSWER_CACHE[cache_key] = res
+        _ANSWER_CACHE.move_to_end(cache_key)
+        while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
+            _ANSWER_CACHE.popitem(last=False)
         return res
 
     backend = cfg["answer"].get("backend", "template")
@@ -497,7 +602,7 @@ def answer(
             question=question,
             max_chars=int(cfg["answer"].get("max_answer_chars", 400)),
         )
-        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg)
+        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="point")
         text = _clean_generated_answer(text)
         citation_hits = hits
 
@@ -526,7 +631,7 @@ def answer(
         for n, h in enumerate(citation_hits, start=1)
     ]
 
-    return {
+    result = {
         "question": question,
         "backend": backend,
         "strategy": "point",
@@ -535,9 +640,124 @@ def answer(
         "answer": text,
         "citations": citations,
     }
+    _ANSWER_CACHE[cache_key] = result
+    _ANSWER_CACHE.move_to_end(cache_key)
+    while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
+        _ANSWER_CACHE.popitem(last=False)
+    return result
 
 
-# --------------------------------------------------------------------------- #
+def answer_stream(
+    store: Store,
+    lex: Lexicon,
+    question: str,
+    cfg: dict[str, Any],
+    strategy: str = "auto",
+):
+    """流式问答：先完成闸门 + 检索 + 引用组装（yield meta），再流式生成回答正文（yield delta）。
+
+    yield 两种事件：
+      {"type": "meta", ...}      —— 检索完成，包含 strategy / gate / citations 等元数据
+      {"type": "delta", "text"}  —— LLM 生成的文本增量
+      {"type": "done", ...}      —— 生成完成，包含最终 answer
+      {"type": "error", "detail"}—— 出错
+
+    前端收到 meta 后立即渲染引用面板和卡片框架，收到 delta 后逐字追加到回答区域。
+    """
+    # ---- ① 问题闸门 ----
+    gate = check_question(question, lex, cfg)
+    if not gate["ok"]:
+        yield {"type": "meta", "strategy": "gate", "gate": gate, "skipped": True,
+               "answer": skip_answer(gate), "citations": []}
+        return
+
+    # ---- ①b 语义相关性格挡 ----
+    gate_cfg = cfg.get("gate", {}) if cfg else {}
+    if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
+        rel_gate = check_relevance(store, question, cfg)
+        if not rel_gate["ok"]:
+            yield {"type": "meta", "strategy": "gate", "gate": rel_gate, "skipped": True,
+                   "answer": skip_answer(rel_gate), "citations": []}
+            return
+
+    # ---- ② 类型判定 ----
+    strat = (strategy or "auto").lower()
+    if strat not in ("point", "theme"):
+        strat = classify_question(question, lex)
+
+    if strat == "theme":
+        yield from _theme_answer_stream(store, lex, theme_topic(question, lex), cfg, question, gate)
+        return
+
+    backend = cfg["answer"].get("backend", "template")
+    max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
+    candidate_ctx = int(cfg["answer"].get("candidate_chunks", max(max_ctx, 16)))
+
+    # ---- ② 检索 ----
+    hits = hybrid_search(
+        store, question, cfg, lex,
+        top_k=candidate_ctx if backend == "template" else max_ctx,
+    )
+    doc_title = store.manifest.get("doc_title", "")
+
+    # ---- 组装引用（在生成之前发给前端）----
+    citations = [
+        {
+            "n": n,
+            "chunk_id": h["chunk"].chunk_id,
+            "citation": h["chunk"].citation(doc_title),
+            "chapter_path": h["chunk"].chapter_path,
+            "unit": h["chunk"].unit_code(),
+            "unit_title": lex.unit_title(h["chunk"].unit_code()),
+            "volume": h["chunk"].volume(),
+            "start": h["chunk"].start,
+            "end": h["chunk"].end,
+            "page": h["chunk"].page,
+            "chunk_type": h["chunk"].chunk_type,
+            "philosophers": h["chunk"].philosophers,
+            "concepts": h["chunk"].concepts,
+            "eras": h["chunk"].eras,
+            "text": h["chunk"].text,
+            "score": round(h["score"], 6),
+        }
+        for n, h in enumerate(hits, start=1)
+    ]
+
+    # ---- ③ 生成 ----
+    if backend == "template":
+        text, citation_hits = template_answer(question, hits, doc_title, lex)
+        yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
+               "skipped": False, "citations": citations}
+        yield {"type": "delta", "text": text}
+        yield {"type": "done", "answer": text}
+        return
+
+    prompt = PROMPT_TEMPLATE.format(
+        context=build_context(hits, doc_title),
+        question=question,
+        max_chars=int(cfg["answer"].get("max_answer_chars", 400)),
+    )
+
+    yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
+           "skipped": False, "citations": citations}
+
+    full_text: list[str] = []
+    if backend == "ollama":
+        # Ollama 暂不支持流式（保持原行为）
+        text = ollama_answer(prompt, cfg)
+        text = _clean_generated_answer(text)
+        yield {"type": "delta", "text": text}
+        yield {"type": "done", "answer": text}
+    else:
+        try:
+            for chunk in api_answer_stream(prompt, cfg, strategy="point"):
+                full_text.append(chunk)
+                yield {"type": "delta", "text": chunk}
+        except Exception as exc:
+            yield {"type": "error", "detail": str(exc)}
+            return
+        text = _clean_generated_answer("".join(full_text))
+        yield {"type": "done", "answer": text}
 # 范围查询策略（溯源回答的 theme 分支）
 # --------------------------------------------------------------------------- #
 # 点查询的提示词要求「3—5 段、不超过 700 字」——它是为**定位一句出处**设计的。
@@ -733,7 +953,7 @@ def theme_answer(
             min_chars=int(a_cfg.get("theme_min_chars", 1500)),
             max_chars=int(a_cfg.get("theme_max_chars", 4000)),
         )
-        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg)
+        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="theme")
         text = _clean_generated_answer(text)
         citations = [
             {
@@ -785,3 +1005,88 @@ def theme_answer(
             "eras": res["eras"],
         },
     }
+
+
+def _theme_answer_stream(
+    store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any],
+    question: str, gate: dict[str, Any],
+):
+    """范围查询的流式生成，被 answer_stream 调用。"""
+    from .theme import theme_search
+
+    res = theme_search(store, lex, topic, cfg)
+    backend = cfg["answer"].get("backend", "template")
+    doc_title = store.manifest.get("doc_title", "") or cfg.get("doc", {}).get("title", "")
+
+    citations = [
+        {
+            "n": i,
+            "chunk_id": u["groups"][0]["chunk_ids"][0] if u["groups"] else "",
+            "citation": f"{doc_title} · {u['code']} {u['title']}",
+            "unit": u["code"],
+            "unit_title": u["title"],
+            "volume": u["volume"],
+            "page": u["groups"][0]["page"] if u["groups"] else 0,
+            "start": u["groups"][0]["start"] if u["groups"] else 0,
+            "end": u["groups"][0]["end"] if u["groups"] else 0,
+            "chunk_type": "body",
+            "philosophers": res["anchors"]["philosophers"],
+            "concepts": res["anchors"]["concepts"],
+            "eras": [],
+            "text": u["groups"][0]["text"][:600] if u["groups"] else "",
+            "score": u["density"],
+        }
+        for i, u in enumerate(res["units"], start=1)
+    ]
+
+    theme_meta = {
+        "seed_mode": res["seed_mode"],
+        "anchors": res["anchors"],
+        "counts": res["counts"],
+        "units": [
+            {"code": u["code"], "title": u["title"], "volume": u["volume"],
+             "hits": u["hits"], "total": u["total"], "density": u["density"]}
+            for u in res["units_all"]
+        ],
+        "lineage": res["lineage"],
+        "eras": res["eras"],
+    }
+
+    if backend == "template":
+        text, _ = render_theme(res, lex, cfg)
+        yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
+               "skipped": False, "citations": citations, "theme": theme_meta,
+               "question": question}
+        yield {"type": "delta", "text": text}
+        yield {"type": "done", "answer": text}
+        return
+
+    a_cfg = cfg["answer"]
+    prompt = THEME_PROMPT.format(
+        doc_title=doc_title,
+        topic=topic,
+        context=res["context"],
+        min_chars=int(a_cfg.get("theme_min_chars", 1500)),
+        max_chars=int(a_cfg.get("theme_max_chars", 4000)),
+    )
+
+    yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
+           "skipped": False, "citations": citations, "theme": theme_meta,
+           "question": question}
+
+    full_text: list[str] = []
+    if backend == "ollama":
+        text = ollama_answer(prompt, cfg)
+        text = _clean_generated_answer(text)
+        yield {"type": "delta", "text": text}
+        yield {"type": "done", "answer": text}
+    else:
+        try:
+            for chunk in api_answer_stream(prompt, cfg, strategy="theme"):
+                full_text.append(chunk)
+                yield {"type": "delta", "text": chunk}
+        except Exception as exc:
+            yield {"type": "error", "detail": str(exc)}
+            return
+        text = _clean_generated_answer("".join(full_text))
+        yield {"type": "done", "answer": text}
