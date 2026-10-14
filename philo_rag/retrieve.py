@@ -314,7 +314,9 @@ def _load_reranker(cfg: dict[str, Any]) -> Any | None:
     try:
         from sentence_transformers import CrossEncoder
 
-        ce = CrossEncoder(resolved)
+        # max_length 与 rerank_max_chars(256) 对齐：输入已截断到 256 字符，
+        # 默认 max_length=512 会导致 padding 浪费计算。设 256 不改变打分结果。
+        ce = CrossEncoder(resolved, max_length=256)
         _RERANK_CACHE[key] = ce
         return ce
     except Exception as exc:  # noqa: BLE001
@@ -374,7 +376,7 @@ def _rerank(
     scores = _RERANK_SCORE_CACHE.get(key)
     if scores is None:
         pairs = [(query, _clip_chunk_text(r["chunk"].text, max_chars)) for r in head]
-        raw = ce.predict(pairs)
+        raw = ce.predict(pairs, batch_size=len(pairs))
         if not isinstance(raw, (list, np.ndarray)):
             raw = [raw]
         scores = [float(s) for s in raw]

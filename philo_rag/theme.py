@@ -72,8 +72,12 @@ def _seed_anchor(
 
     这是旧「关键词密度聚合」的等价物 —— 先看主题在哪里密集出现，
     再由那里反推出它实际关联的理论家与概念。
+
+    种子检索只需粗排来反推锚点（统计共现频率），不需要重排精排，
+    这里临时关闭重排以省掉一次完整的交叉编码器推理（~4s）。
     """
-    seeds = hybrid_search(store, topic, cfg, lex, top_k=seed_k)
+    seed_cfg = {**cfg, "retrieval": {**cfg.get("retrieval", {}), "rerank": False}}
+    seeds = hybrid_search(store, topic, seed_cfg, lex, top_k=seed_k)
     pc: collections.Counter[str] = collections.Counter()
     cc: collections.Counter[str] = collections.Counter()
     for r in seeds[: max(20, seed_k // 2)]:
@@ -214,15 +218,11 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
 
     collected = _collect(store, lex, topic, phils, concs, units)
     direct = collected["meta"] + collected["literal"]
-    direct_ids = {c.chunk_id for c in direct}
 
-    # 语义补充：只保留直接命中之外、且标签或正文与锚点有弱关联的块
+    # 语义补充（semantic_top_k）在之前版本会额外跑一次完整 hybrid_search 做语义近似召回，
+    # 但结果只计入 counts.extended 统计数，从未进入上下文 context 或最终答案——
+    # 属于纯额外开销（实测 ~3.7s），直接去掉。配置项保留以兼容旧配置。
     extended: list[Chunk] = []
-    if sem_k:
-        for r in hybrid_search(store, topic, cfg, lex, top_k=sem_k):
-            c: Chunk = r["chunk"]
-            if c.chunk_id not in direct_ids:
-                extended.append(c)
 
     units_agg = _aggregate_by_unit(store, lex, direct, group_gap)
     kept = units_agg[:max_units]
