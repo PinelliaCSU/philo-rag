@@ -271,7 +271,7 @@ button.ghost:hover:not(:disabled) {
 .card > :last-child { margin-bottom: 0; }
 .card p { margin: 0 0 1.15em; }
 
-pre.ans {
+.ans {
   max-width: var(--reading-width);
   margin: 0;
   color: var(--color-text);
@@ -279,9 +279,35 @@ pre.ans {
   font-size: 15.5px;
   font-weight: 400;
   line-height: 1.95;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: normal;
+}
+
+/* 回答正文里的 Markdown：范围查询带四节标题与小节标题，点查询用不上 */
+.ans > :first-child { margin-top: 0; }
+.ans > :last-child { margin-bottom: 0; }
+.ans p { margin: 0 0 1.05em; }
+.ans h4, .ans h5 {
+  margin: 1.5em 0 .55em;
+  color: var(--color-text);
+  line-height: 1.6;
+}
+.ans h4 { font-size: 15.5px; font-weight: 600; }
+.ans h5 { font-size: 15px; font-weight: 500; }
+.ans strong { font-weight: 600; }
+.ans ul, .ans ol { margin: 0 0 1.05em; padding-left: 1.5em; }
+.ans li { margin: 0 0 .35em; }
+.ans hr {
+  margin: 1.6em 0;
+  border: 0;
+  border-top: var(--border-width) solid var(--color-border);
+}
+.ans code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  font-family: var(--font-mono);
+  font-size: .9em;
 }
 
 .tag {

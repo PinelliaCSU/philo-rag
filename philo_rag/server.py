@@ -14,6 +14,7 @@
     GET  /api/units           体系目录（卷 → 单元）
     GET  /api/concepts        术语卡列表
     POST /api/ask             溯源回答（body 可传 strategy：auto | point | theme）
+    POST /api/ask_stream      溯源回答（SSE 流式：meta → delta… → done）
     GET  /api/term?term=      术语索引与语义检索
     GET  /api/quote?...       引文检索（按理论家 / 说话人 / 概念 / 单元精确过滤）
     GET  /api/context?...     取某块及其上下文（用于「查看上下文」）
@@ -183,17 +184,30 @@ def create_app(cfg: dict) -> FastAPI:
     async def ask_stream(req: AskRequest):
         """SSE 流式问答：先发 meta 事件（含引用），再逐块发 delta 事件，最后发 done。
 
-        前端用 EventSource 或 fetch + ReadableStream 消费，收到 meta 后立即渲染
-        引用面板，收到 delta 后逐字追加回答正文——本地检索完成后即可开始输出。
+        前端用 fetch + ReadableStream 消费，收到 meta 后立即渲染引用面板，
+        收到 delta 后逐字追加回答正文——本地检索完成后即可开始输出。
+
+        这里必须把**同步生成器**直接交给 StreamingResponse，而不要在事件循环里
+        用 async generator 迭代它：检索、重排、调用生成接口全是阻塞调用，一旦在
+        事件循环线程里跑，循环就被占住，传输层的写缓冲要等生成结束才会刷进 socket
+        ——前端只能在全流程结束后一次性收到全部事件，「流式」名存实亡。
+        交给同步生成器后，Starlette 会用 iterate_in_threadpool 把每次 next() 丢到
+        工作线程，事件循环得以在每个事件之间把数据真正发出去。
         """
         import json as _json
 
-        async def event_gen():
-            store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+
+        def event_gen():
             for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy):
                 yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
 
-        return StreamingResponse(event_gen(), media_type="text/event-stream")
+        # no-cache / X-Accel-Buffering：避免浏览器与反向代理再次把 SSE 攒起来
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/api/term")
     def term(term: str = Query(..., min_length=1), limit: int = 8) -> dict:

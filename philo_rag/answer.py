@@ -53,13 +53,21 @@ _ANSWER_CACHE: collections.OrderedDict[tuple[str, str], dict[str, Any]] = collec
 _ANSWER_CACHE_MAX = 64
 
 PROMPT_TEMPLATE = """你是一位严谨的哲学文献助手，正在为读者讲解《哲学大纲》一书。
+读者没有读过这本书，只想弄清「这里到底在说什么」——你的任务是让他**读懂**，而不是让他记住一串术语。
 
-要求：
-1. 只使用下面「资料」中的内容作答，不要引入资料之外的知识；
+写作要求：
+1. 只使用下面「资料」中的内容作答，不要引入资料之外的知识；解释术语时可以照用「术语速查」里的定义；
 2. 每个论断后面用 [编号] 标注来源，例如 [1][3]；只输出融贯的回答正文，不要输出“出处：”或来源列表；
 3. 如果资料不足以回答，请直接说明「资料不足」，绝不编造；
-4. 涉及哲学大纲体系时，使用其术语（字头、场域论、本体论、认识论、目的论、四话语等）；
-5. 用中文回答，条理清晰，分成 3—5 个自然段，依次说明：核心定义、形成机制或论证路径、不同理论位置的张力，最后给出一句总结；不超过 {max_chars} 字。
+4. **先说人话**：第一段第一句用一句日常语言给出结论，这一句里不出现本书特有的术语；先让读者听懂结论，再层层展开；
+5. **术语首次出现必须解释**：书里的术语（字头、场域论、大他者等）可以用，但每个术语**第一次**出现时紧跟「（即……）」补一句不超过 25 字的白话解释，解释照「术语速查」给的定义，不要自创；同一术语只解释一次，后文直接用它；
+6. **不要把术语串成定语链**：不要写「A 所预设的、由 B 兜底的 C」这类一层套一层的长定语；一句话里出现多个术语时，拆成几句话，用日常语言把彼此关系讲出来；
+7. 不要照抄资料里的单元编号或排版标记（例如把「2 形而上学」写成「2形而上学」），引用来源一律用 [编号]；
+8. 用中文回答，条理清晰，分成 3—5 个自然段，依次说明：核心定义、形成机制或论证路径、不同理论位置的张力，最后给出一句总结；不超过 {max_chars} 字；
+9. 写完自查一遍：上文凡是用到「术语速查」里的术语，第一次出现处是否都带了「（即……）」解释？漏掉的补上。
+
+术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
+{glossary}
 
 资料：
 {context}
@@ -77,6 +85,60 @@ def build_context(hits: list[dict[str, Any]], doc_title: str) -> str:
         c: Chunk = h["chunk"]
         parts.append(f"[{n}] {c.text}")
     return "\n\n".join(parts)
+
+
+# 术语速查最多注入多少条。检索到的资料通常只含 15—25 个词典术语，取 18 条能覆盖
+# 其中绝大部分（漏掉的往往正是模型随后会用上的那几个）；再多就会挤占正文篇幅，
+# 也会让模型产生「这些词都得写进去」的错觉，反而更晦涩。
+GLOSSARY_MAX_TERMS = 18
+
+
+def _term_counts(text: str, lex: Lexicon) -> dict[str, int]:
+    """统计词典术语（含别名）在文本中的出现次数，用于判断「本次回答绕不开哪些术语」。"""
+    counts: dict[str, int] = {}
+    for name, info in lex.concepts.items():
+        n = sum(text.count(alias) for alias in (name, *(info.get("aliases") or [])) if alias)
+        if n:
+            counts[name] = n
+    return counts
+
+
+def build_glossary(question: str, context_texts: list[str], lex: Lexicon,
+                   max_terms: int = GLOSSARY_MAX_TERMS) -> str:
+    """挑出本次回答会用到的术语，连同**词典里已有的**一句话定义注入提示词。
+
+    《哲学大纲》正文通篇是本书自造或挪用的术语，模型照抄资料就晦涩难懂。而
+    `lexicon/concepts.yaml` 给每个术语都写好了白话定义——这里把它们喂给模型，
+    让「术语首次出现时解释一句」有据可依；否则模型要么不解释，要么自己编一个说法。
+
+    选取顺序：问题里出现的术语优先（那才是读者真正在问的），其余按在资料中出现的
+    次数排序——在资料里反复出现的，正是模型接下来会写进回答的那批术语。
+    """
+    if not lex or not lex.concepts:
+        return "（本次没有可用的术语定义；遇到术语请用资料中的说法简要说明。）"
+
+    q_counts = _term_counts(question, lex)
+    ctx_counts = _term_counts("\n".join(context_texts), lex)
+
+    ranked = sorted(
+        set(q_counts) | set(ctx_counts),
+        key=lambda name: (
+            0 if name in q_counts else 1,
+            -(3 * q_counts.get(name, 0) + ctx_counts.get(name, 0)),
+            name,
+        ),
+    )
+
+    lines: list[str] = []
+    for name in ranked:
+        if len(lines) >= max_terms:
+            break
+        definition = str(lex.concepts[name].get("definition", "") or "").strip()
+        if definition:
+            lines.append(f"- {name}：{definition}")
+    if not lines:
+        return "（本次没有可用的术语定义；遇到术语请用资料中的说法简要说明。）"
+    return "\n".join(lines)
 
 
 def _sentences(text: str) -> list[str]:
@@ -598,6 +660,7 @@ def answer(
         text, citation_hits = template_answer(question, hits, doc_title, lex)
     else:
         prompt = PROMPT_TEMPLATE.format(
+            glossary=build_glossary(question, [h["chunk"].text for h in hits], lex),
             context=build_context(hits, doc_title),
             question=question,
             max_chars=int(cfg["answer"].get("max_answer_chars", 400)),
@@ -733,6 +796,7 @@ def answer_stream(
         return
 
     prompt = PROMPT_TEMPLATE.format(
+        glossary=build_glossary(question, [h["chunk"].text for h in hits], lex),
         context=build_context(hits, doc_title),
         question=question,
         max_chars=int(cfg["answer"].get("max_answer_chars", 400)),
@@ -777,8 +841,15 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
    ③ 衍生与谱系——与主题并置、由主题派生的其他理论家与单元，说明其关系（上游/同代/后继/反对）；
    ④ 张力与批判——书中对该主题的保留意见、内部矛盾、未决问题；
 3. 每个核心单元至少给出 2—3 句有实质内容的论述，**不要只摘一句就换下一个单元**；
-4. 保留原文的关键术语与引文（用「」标出），不要改写成通俗解释，也不要合并不同单元的表述；
-5. 用中文，篇幅约 {min_chars}—{max_chars} 字，宁可详实不要空泛。
+4. 引文照原文保留（用「」标出），不要改写、不要合并不同单元的表述；但**术语不能只堆不解释**——书里的术语第一次出现时，紧跟「（即……）」补一句不超过 25 字的白话解释，解释照「术语速查」的定义，不要自创，同一术语只解释一次；
+5. 开篇先用 2—3 句日常语言交代「这个主题大致在讲什么、结论是什么」，再进入四节结构；全篇用日常语言把关系讲清楚，术语只作锚点，不要写成一层套一层的长定语；
+6. 不要照抄资料里的单元编号或排版标记，引用来源一律用 [单元编号] /（p页码）；
+7. **用 Markdown 排版**：四节标题写成 `### ① 体系定位` 这样的三级标题（只写裸的「① 体系定位」会与正文混作一段），节内小标题用 `####`，需要强调时用 `**…**`；只使用这几种标记，不要用表格、HTML 标签或链接；
+8. 用中文，篇幅约 {min_chars}—{max_chars} 字，宁可详实不要空泛；
+9. 写完自查一遍：上文凡是用到「术语速查」里的术语，第一次出现处是否都带了「（即……）」解释？漏掉的补上。
+
+术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
+{glossary}
 
 资料（已按单元聚合；标题行给出单元编号、标题、命中块数）：
 {context}
@@ -949,6 +1020,7 @@ def theme_answer(
         prompt = THEME_PROMPT.format(
             doc_title=doc_title,
             topic=topic,
+            glossary=build_glossary(topic, [res["context"]], lex),
             context=res["context"],
             min_chars=int(a_cfg.get("theme_min_chars", 1500)),
             max_chars=int(a_cfg.get("theme_max_chars", 4000)),
@@ -1065,6 +1137,7 @@ def _theme_answer_stream(
     prompt = THEME_PROMPT.format(
         doc_title=doc_title,
         topic=topic,
+        glossary=build_glossary(topic, [res["context"]], lex),
         context=res["context"],
         min_chars=int(a_cfg.get("theme_min_chars", 1500)),
         max_chars=int(a_cfg.get("theme_max_chars", 4000)),

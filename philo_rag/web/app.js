@@ -48,6 +48,86 @@ function startTimer(el) {
   }, 100);
 }
 
+/* ------------------------------ 轻量 Markdown ------------------------------
+   范围查询的回答是带结构的：四节标题、小节标题、**强调**。后端按 Markdown 输出，
+   这里做最小可用渲染——刻意不引入 Markdown 库：本项目要求无构建步骤、离线可用，
+   而回答只会用到标题 / 强调 / 列表 / 分隔线 / 行内代码这几种语法。
+   所有文本先过 esc()，因此渲染结果是安全的；`[3][5]` 这类引用不会被改动。
+   ------------------------------------------------------------------------- */
+const RE_MD_HEADING = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
+const RE_MD_HR = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const RE_MD_UL = /^\s{0,3}[-*+]\s+(.+)$/;
+const RE_MD_OL = /^\s{0,3}\d+[.)]\s+(.+)$/;
+/* 模型有时漏掉 `###`，只写裸的「① 体系定位」——这种独占一行的圈号短行按小节标题渲染 */
+const RE_MD_CIRCLED = /^\s*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*[^\s。；！？][^。；！？]{0,24}$/;
+
+function mdInline(s) {
+  return esc(s)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+
+function mdToHtml(text) {
+  const out = [];
+  let para = [];
+  let list = null;
+
+  const flushPara = () => {
+    if (para.length) {
+      out.push(`<p>${mdInline(para.join('\n')).replace(/\n/g, '<br>')}</p>`);
+      para = [];
+    }
+  };
+  const flushList = () => {
+    if (list) { out.push(`</${list}>`); list = null; }
+  };
+
+  for (const line of (text || '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (!line.trim()) { flushPara(); flushList(); continue; }
+
+    const head = RE_MD_HEADING.exec(line);
+    if (head) {
+      flushPara(); flushList();
+      const tag = head[1].length <= 3 ? 'h4' : 'h5';
+      out.push(`<${tag}>${mdInline(head[2])}</${tag}>`);
+      continue;
+    }
+    if (!para.length && !list && RE_MD_HR.test(line)) {
+      flushList(); out.push('<hr>'); continue;
+    }
+    if (!para.length && !list && RE_MD_CIRCLED.test(line)) {
+      out.push(`<h4>${mdInline(line.trim())}</h4>`); continue;
+    }
+    const ul = RE_MD_UL.exec(line);
+    const ol = ul ? null : RE_MD_OL.exec(line);
+    if (ul || ol) {
+      flushPara();
+      const kind = ul ? 'ul' : 'ol';
+      if (list !== kind) { flushList(); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${mdInline((ul || ol)[1])}</li>`);
+      continue;
+    }
+    flushList();
+    para.push(line);
+  }
+  flushPara();
+  flushList();
+  return out.join('');
+}
+
+/* 流式追加时按帧合并渲染：delta 每秒可上百个，逐个重排会明显卡顿。
+   若容器已被 renderAnswer() 换掉（done 时重渲染），这一帧自动作废。 */
+let answerFrame = 0;
+function paintAnswer(el, text) {
+  cancelAnimationFrame(answerFrame);
+  answerFrame = requestAnimationFrame(() => {
+    if (!el.isConnected) return;
+    el.innerHTML = mdToHtml(text);
+    const pane = $('#ask-out');
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  });
+}
+
 /* 通用分页：把长列表收进固定区域，用按钮逐页浏览，而不是让页面无限延长 */
 function pagerHTML(total, page, perPage) {
   const pages = Math.max(1, Math.ceil(total / perPage));
@@ -130,7 +210,7 @@ function renderAnswer(r) {
   const out = $('#ask-out');
   if (r.skipped) {
     out.innerHTML = `<div class="card"><h3>已跳过检索</h3>
-      <pre class="ans">${esc(r.answer)}</pre>
+      <div class="ans">${mdToHtml(r.answer)}</div>
       <div class="muted">判定类别：${esc((r.gate || {}).category || '')}</div></div>`;
     return;
   }
@@ -148,7 +228,7 @@ function renderAnswer(r) {
       <div class="overview-lineage">${lin}</div></div>`;
   }
   h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${strategyTag(r)}</span></h3>
-    <pre class="ans">${esc(r.answer)}</pre></div>`;
+    <div class="ans">${mdToHtml(r.answer)}</div></div>`;
   out.innerHTML = h;
   out.scrollTop = 0;
 }
@@ -225,16 +305,13 @@ async function doAsk(q, strategy) {
           answerText = '';
           state.citePage = 0;
           state.ask = event;
-          // 构建回答框架：先空 pre，后续 delta 逐字追加
+          // 构建回答框架：先空容器，后续 delta 逐帧追加渲染
           renderAnswerSkeleton(event);
           renderCitations(event);
           answerEl = $('#ask-answer-text');
         } else if (event.type === 'delta') {
           answerText += event.text;
-          if (answerEl) {
-            answerEl.textContent = answerText;
-            answerEl.scrollTop = answerEl.scrollHeight;
-          }
+          if (answerEl) paintAnswer(answerEl, answerText);
         } else if (event.type === 'done') {
           // 最终清理（去掉模型可能输出的来源行）
           if (meta) {
@@ -264,12 +341,12 @@ async function doAsk(q, strategy) {
   }
 }
 
-/* 流式专用：先搭骨架，delta 逐字追加 */
+/* 流式专用：先搭骨架，delta 逐帧追加渲染 */
 function renderAnswerSkeleton(r) {
   const out = $('#ask-out');
   if (r.skipped) {
     out.innerHTML = `<div class="card"><h3>已跳过检索</h3>
-      <pre class="ans">${esc(r.answer || '')}</pre>
+      <div class="ans">${mdToHtml(r.answer || '')}</div>
       <div class="muted">判定类别：${esc((r.gate || {}).category || '')}</div></div>`;
     return;
   }
@@ -288,7 +365,7 @@ function renderAnswerSkeleton(r) {
   }
   const tag = r.skipped ? '已跳过' : (r.strategy === 'theme' ? '范围查询' : '点查询');
   h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${tag}</span></h3>
-    <pre class="ans" id="ask-answer-text"></pre></div>`;
+    <div class="ans" id="ask-answer-text"></div></div>`;
   out.innerHTML = h;
   out.scrollTop = 0;
 }
