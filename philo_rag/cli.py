@@ -14,9 +14,13 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
+import os
+import re
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -44,12 +48,49 @@ _PATH_KEYS = [
     ("output", "dir"),
 ]
 
+# ${ENV_VAR} 占位符：让 config.yaml 里不出现明文密钥，配置文件可安全提交与分享
+_ENV_PAT = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _load_dotenv(root: Path) -> None:
+    """把项目根目录的 .env 读进环境变量（已存在的同名变量不覆盖）。
+
+    只做最朴素的 KEY=VALUE 解析，够用且不引入额外依赖。密钥因此可以只放在
+    .env（已在 .gitignore 中）里，而 config.yaml 保持可提交、可分享。
+    """
+    env_file = root / ".env"
+    if not env_file.exists():
+        return
+    for raw in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, val)
+
+
+def _expand_env(value):
+    """递归展开配置里的 ${VAR}：字典 / 列表 / 字符串都支持。"""
+    if isinstance(value, str):
+        return _ENV_PAT.sub(lambda m: os.environ.get(m.group(1), ""), value)
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    return value
+
 
 def load_config(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     root = path.resolve().parent
     cfg["_root"] = str(root)
+    # 先加载 .env，再展开 ${VAR}：密钥可以只存在于 .env 或系统环境变量中
+    _load_dotenv(root)
+    cfg = _expand_env(cfg)
     for section, key in _PATH_KEYS:
         sec = cfg.get(section) or {}
         val = sec.get(key)
@@ -145,6 +186,9 @@ def cmd_ask(cfg: dict, args: argparse.Namespace) -> None:
     if args.no_gate:
         # 调试/对比用：临时关闭问题闸门，强制所有问题进入检索
         cfg.setdefault("gate", {})["enabled"] = False
+    if getattr(args, "backend", None):
+        # 临时覆盖生成后端，便于对比「离线抽取式」与「云端生成」的回答差异
+        cfg.setdefault("answer", {})["backend"] = args.backend
     res = answer_fn(store, lex, args.question, cfg, strategy=args.strategy)
     _emit("answer", res, args, cfg)
 
@@ -190,7 +234,12 @@ def cmd_serve(cfg: dict, args: argparse.Namespace) -> None:
 
 
 def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
-    """一键自检：采集 → 建索引 → 跑通三类检索。"""
+    """一键自检：采集 → 建索引 → 跑通三类检索。
+
+    自检的问答环节**固定用离线 template 后端**，这样即使还没配 API Key，
+    也能完整验证「索引 → 检索 → 组织证据」这条链路；若 config.yaml 配的是
+    云端/本地模型后端，末尾会额外做一次真实的生成调用探测。
+    """
     from .prepare import prepare
 
     doc = cfg["doc"]
@@ -210,16 +259,20 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
     for k in ("doc_title", "chunk_count", "quote_count", "embedding_backend", "vector_dim"):
         print(f"  {k:20s} {store.manifest[k]}")
 
+    # 检索链路自检不依赖任何模型服务：强制离线后端，保证「没配 key 也能跑通」
+    demo_cfg = copy.deepcopy(cfg)
+    demo_cfg.setdefault("answer", {})["backend"] = "template"
+
     for q in ["什么是字头？", "四层分别是什么？", "1-1 科学实在论的核心是什么？"]:
         _rule(f"点查询：{q}")
-        res = answer_fn(store, lex, q, cfg)
+        res = answer_fn(store, lex, q, demo_cfg)
         print(f"  [策略 {res['strategy']}] 回答 {len(res['answer'])} 字")
         print(res["answer"].splitlines()[0] if res["answer"] else "")
         print("  来源：" + " | ".join(c["citation"] for c in res["citations"][:2]))
 
     for q in ["马克思在体系中的位置", "谈谈精神分析"]:
         _rule(f"范围查询：{q}")
-        res = answer_fn(store, lex, q, cfg)
+        res = answer_fn(store, lex, q, demo_cfg)
         c = res["theme"]["counts"]
         print(f"  [策略 {res['strategy']}] 回答 {len(res['answer'])} 字　锚点 {res['theme']['anchors']}")
         print(f"  直接命中 {c['direct']} 块（占语料 {c['direct']/c['corpus']:.1%}），"
@@ -234,6 +287,20 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
         if card:
             print(f"  {card['name']}（{card['philosopher']}，{card['lifespan']}）：{card['definition']}")
         print(f"  精确命中 {res['exact_total']} 块")
+
+    # 生成后端连通性：配置了非离线后端时，额外探测一次真实调用
+    backend = str(cfg.get("answer", {}).get("backend", "template"))
+    if backend != "template":
+        _rule(f"生成后端连通性探测：{backend}")
+        try:
+            from .answer import generate_text
+
+            t0 = time.perf_counter()
+            reply = generate_text("请只回复两个字：就绪", cfg)
+            print(f"  ✓ {backend} 可用（{time.perf_counter() - t0:.1f}s）：{reply[:60]}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ✗ {backend} 调用失败：{exc}")
+            print("    检索链路自检已通过；请检查 .env / config.yaml 中的 key 与 api_base。")
 
     _rule("自检通过")
 
@@ -271,6 +338,8 @@ def main(argv: list[str] | None = None) -> None:
                             "theme 强制范围查询（主题综合）")
     p_ask.add_argument("--no-gate", action="store_true",
                        help="关闭问题闸门，强制所有问题进入检索（调试用）")
+    p_ask.add_argument("--backend", choices=["template", "ollama", "api"],
+                       help="临时覆盖生成后端（默认取 config.yaml 的 answer.backend）")
     _add_common(p_ask)
     p_ask.set_defaults(func=cmd_ask)
 
@@ -311,7 +380,13 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     cfg = load_config(Path(args.config))
-    args.func(cfg, args)
+    try:
+        args.func(cfg, args)
+    except (ValueError, RuntimeError) as exc:
+        # 配置类错误（缺 key、api_base 为空、接口返回异常…）不必甩堆栈，
+        # 直接给出可读原因，退出码非零便于脚本判断。
+        print(f"\n[错误] {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

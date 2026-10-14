@@ -16,6 +16,10 @@ PyMuPDF>=1.24
 fastapi>=0.110
 uvicorn>=0.29
 
+# ---- 生成层默认走云端 API，无需任何额外依赖 ----
+# 默认 answer.backend=api（阿里云百炼 DashScope，OpenAI 兼容），只用标准库 urllib。
+# 密钥放项目根目录 .env：DASHSCOPE_API_KEY=sk-xxx（见 .env.example）。
+
 # ---- 推荐（真正的语义向量；离线默认用项目自带模型，装它就够了）----
 sentence-transformers>=2.7
 

@@ -98,11 +98,16 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/stats")
     def stats() -> dict:
-        store, lex = _STATE["store"], _STATE["lex"]
+        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        a_cfg = cfg.get("answer", {}) or {}
         return {
             "manifest": store.manifest,
             "volumes": lex.volumes,
             "axes": lex.axes,
+            "answer": {
+                "backend": a_cfg.get("backend", "template"),
+                "model": a_cfg.get("api_model") or a_cfg.get("model", ""),
+            },
             "counts": {
                 "philosophers": len(lex.philosophers),
                 "concepts": len(lex.concepts),
@@ -554,7 +559,8 @@ async function loadFacets(){
   try{
     const s = await jget('/api/stats');
     const m = s.manifest;
-    $('#stat').textContent = `《${m.doc_title}》　${m.chunk_count} 块 · ${m.unit_count} 单元 · ${m.embedding_backend}/${m.vector_dim} 维`;
+    const a = s.answer || {};
+    $('#stat').textContent = `《${m.doc_title}》　${m.chunk_count} 块 · ${m.unit_count} 单元 · ${m.embedding_backend}/${m.vector_dim} 维 · 生成 ${a.backend||''}${a.model?'/'+a.model:''}`;
     loadFacets();
   }catch(e){
     $('#stat').textContent = '初始化失败：' + e.message;

@@ -70,12 +70,32 @@ answer:
   # 说明：溯源回答固定对**整篇语料**做全文检索，不接受单元/概念/理论家等筛选条件。
   # 筛选会先缩小候选池，容易把承载概念定义的段落（常在前言/总纲/其他单元）排除在外。
   # 需要按维度浏览请用 term / quote / facets 三类入口。
-  backend: template         # template（离线抽取式）| ollama（本地模型）| api（云端）
+  #
+  # 三种后端：
+  #   api      —— 任意 OpenAI 兼容 /chat/completions 接口（默认，接阿里云百炼 DashScope）
+  #   ollama   —— 本地模型（数据不出本机，需常驻 Ollama 服务）
+  #   template —— 离线抽取式，不调用任何模型（用于自检与降级）
+  backend: api
   strategy: auto            # auto 按问题自动判定 | point 强制点查询 | theme 强制范围查询
-  model: qwen2.5:7b
+
+  # —— 云端 API（backend: api）——
+  # 默认阿里云百炼（DashScope）OpenAI 兼容模式；换任何 OpenAI 兼容服务只改这三行。
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # 密钥不写明文：在项目根目录的 .env 里设 DASHSCOPE_API_KEY=sk-xxx
+  # （.env 已在 .gitignore 中，不会被提交）；也可直接把 key 填在这里。
+  api_key: ${DASHSCOPE_API_KEY}
+  api_model: qwen-plus      # 百炼模型名：qwen-plus / qwen-max / qwen-turbo …
+  api_max_tokens: 8192      # 输出上限；范围查询要写 1500–4000 字，必须给足
+  api_timeout: 300          # 单次请求超时（秒）；范围查询上下文大、耗时较长
+  api_retries: 2            # 429 / 5xx / 网络错误的自动退避重试次数
+  api_extra: {}             # 需要时透传额外参数，如 {enable_thinking: false}
+
+  # —— 本地 Ollama（backend: ollama，可选）——
   ollama_base: http://localhost:11434
-  api_base: ""
-  api_key: ""
+  ollama_model: qwen2.5:7b  # 留空则回退到 model
+
+  # —— 通用 ——
+  model: qwen-plus          # 未单独指定 api_model / ollama_model 时的默认模型
   max_context_chunks: 8
   candidate_chunks: 20       # 点查询的候选证据数，再压缩为少量论证段
   temperature: 0.2

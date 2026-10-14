@@ -1,9 +1,9 @@
 """生成层：引用溯源问答（单入口，内部按问题类型分策略）。
 
-三种后端：
-  template —— 离线抽取式，不调用任何模型，直接给出带引用的原文片段（默认，用于自检与降级）
+三种后端（由 config.yaml 的 answer.backend 选择，默认 api）：
+  api      —— 任意 OpenAI 兼容 /chat/completions 接口（默认；默认接阿里云百炼 DashScope）
   ollama   —— 本地模型（qwen2.5 / llama3 等），数据不出本机
-  api      —— 任意 OpenAI 兼容 /chat/completions 接口
+  template —— 离线抽取式，不调用任何模型，直接给出带引用的原文片段（用于自检与降级）
 
 无论哪种后端、哪种策略，返回结构一致：answer + citations，
 前端可据 citations 跳转原文并高亮。对使用者而言只有一个「溯源回答」入口。
@@ -35,6 +35,8 @@ from __future__ import annotations
 import collections
 import json
 import re
+import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -233,7 +235,7 @@ def ollama_answer(prompt: str, cfg: dict[str, Any]) -> str:
     data = _post(
         f"{a_cfg.get('ollama_base', 'http://localhost:11434').rstrip('/')}/api/generate",
         {
-            "model": a_cfg.get("model", "qwen2.5:7b"),
+            "model": a_cfg.get("ollama_model") or a_cfg.get("model", "qwen2.5:7b"),
             "prompt": prompt,
             "stream": False,
             "options": {"temperature": float(a_cfg.get("temperature", 0.2))},
@@ -242,21 +244,96 @@ def ollama_answer(prompt: str, cfg: dict[str, Any]) -> str:
     return data.get("response", "").strip()
 
 
+def _api_error_detail(exc: urllib.error.HTTPError) -> str:
+    """把 HTTP 错误体带出来：密钥错误 / 模型未开通 / 额度不足都能一眼看清。"""
+    try:
+        body = exc.read().decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001
+        body = ""
+    body = " ".join(body.split())
+    return f"HTTP {exc.code} {exc.reason}" + (f"：{body[:400]}" if body else "")
+
+
 def api_answer(prompt: str, cfg: dict[str, Any]) -> str:
+    """调用任意 OpenAI 兼容 /chat/completions 接口（默认阿里云百炼 DashScope）。
+
+    与 ollama 后端的差别只在传输层：提示词、上下文、返回结构完全一致，因此点查询与
+    范围查询两条策略都能直接切到云端，检索链路一行都不用改。
+
+    三个工程要点：
+      * `max_tokens` 必须显式给足——范围查询要求 1500—4000 字，默认输出上限会把长文
+        拦腰截断；
+      * 429 / 5xx 与网络抖动自动退避重试，不让偶发失败废掉整次提问；
+      * HTTP 错误体原样回带，直接看到「密钥错误 / 模型未开通 / 额度不足」。
+    """
     a_cfg = cfg["answer"]
-    base = a_cfg.get("api_base", "").rstrip("/")
+    base = str(a_cfg.get("api_base", "") or "").rstrip("/")
     if not base:
-        raise ValueError("answer.api_base 未配置")
-    data = _post(
-        f"{base}/chat/completions",
-        {
-            "model": a_cfg.get("model", "qwen2.5:7b"),
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": float(a_cfg.get("temperature", 0.2)),
-        },
-        headers={"Authorization": f"Bearer {a_cfg.get('api_key', '')}"},
-    )
-    return data["choices"][0]["message"]["content"].strip()
+        raise ValueError(
+            "answer.api_base 未配置。backend=api 时必须指定服务地址，"
+            "例如 https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+    key = str(a_cfg.get("api_key", "") or "").strip()
+    if not key:
+        raise ValueError(
+            "answer.api_key 为空。任选其一：\n"
+            "  · 在项目根目录建 .env，写入 DASHSCOPE_API_KEY=sk-xxx，"
+            "并让 config.yaml 保留 api_key: ${DASHSCOPE_API_KEY}；\n"
+            "  · 或直接把 key 填进 config.yaml 的 answer.api_key。"
+        )
+
+    model = a_cfg.get("api_model") or a_cfg.get("model", "qwen-plus")
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(a_cfg.get("temperature", 0.2)),
+        "stream": False,
+    }
+    if a_cfg.get("api_max_tokens"):
+        payload["max_tokens"] = int(a_cfg["api_max_tokens"])
+    extra = a_cfg.get("api_extra")
+    if isinstance(extra, dict):
+        payload.update(extra)
+
+    url = f"{base}/chat/completions"
+    headers = {"Authorization": f"Bearer {key}"}
+    timeout = int(a_cfg.get("api_timeout", 180))
+    retries = max(0, int(a_cfg.get("api_retries", 2)))
+
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            data = _post(url, payload, headers=headers, timeout=timeout)
+            choices = data.get("choices") or []
+            if not choices:
+                raise RuntimeError(f"接口返回中没有 choices：{str(data)[:300]}")
+            return (choices[0].get("message", {}).get("content") or "").strip()
+        except urllib.error.HTTPError as exc:
+            last = RuntimeError(f"{model} 调用失败：{_api_error_detail(exc)}")
+            if exc.code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise last from exc
+        except urllib.error.URLError as exc:
+            last = RuntimeError(f"无法连接 {base}：{exc.reason}")
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise last from exc
+    raise last if last else RuntimeError("API 调用失败")
+
+
+def generate_text(prompt: str, cfg: dict[str, Any]) -> str:
+    """按配置选择后端，把提示词送出去拿回文本。
+
+    供连通性探测（`demo` / `scripts/check_api.py`）复用，避免各处重复判断后端。
+    """
+    backend = str(cfg.get("answer", {}).get("backend", "template"))
+    if backend == "ollama":
+        return ollama_answer(prompt, cfg)
+    if backend == "api":
+        return api_answer(prompt, cfg)
+    raise ValueError(f"后端 {backend} 不是生成式后端（template 为离线抽取式，无需调用）")
 
 
 # --------------------------------------------------------------------------- #

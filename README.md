@@ -1,7 +1,8 @@
 # 哲学大纲 · 知识库（Philo-RAG）
 
 把《哲学大纲》（四卷合一，约 200 万字）做成一个**可检索、可溯源、可问答**的  
-本地知识库。全部产物都在本机，不需要联网、不需要 API Key 就能跑通完整链路。
+知识库。语料、索引、词典全部落在本机；**生成层默认接云端大模型（只需一把 API Key，
+默认阿里云百炼 DashScope）**，也可一行配置切回本地 Ollama 或完全离线的抽取式后端。
 
 三个使用入口，各自解决一类问题：
 
@@ -52,18 +53,27 @@ python -m venv .venv
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2) 一键跑通：采集语料 → 建索引 → 问答与术语自检
+# 2) 配置生成层的 API Key（默认接阿里云百炼 DashScope）
+cp .env.example .env
+# 编辑 .env，把 DASHSCOPE_API_KEY 填成你自己的 key
+python scripts/check_api.py        # 校验 key 与端点是否连通
+
+# 3) 一键跑通：采集语料 → 建索引 → 问答与术语自检
 python -m philo_rag.cli demo
 
-# 3) 起 Web 界面
+# 4) 起 Web 界面
 python -m philo_rag.cli serve
 # 浏览器打开 http://127.0.0.1:8000
 ```
 
-默认使用项目内自带的 `models/bge-base-zh-v1.5`（中文语义向量，768 维，约 390 MB）与  
-`data/哲学大纲_规范化_全集.txt`（已清洗语料），**离线即可运行**。
+检索与向量化默认使用项目内自带的 `models/bge-base-zh-v1.5`（中文语义向量，768 维，约 390 MB）  
+与 `data/哲学大纲_规范化_全集.txt`（已清洗语料），**这部分完全离线**；只有「生成」这一步  
+会调用你在第 2 步配置的云端模型。
 
 > 首次 `build` 需要给 6000 多个知识块做向量化，CPU 上约 3–6 分钟，之后查询是毫秒级。
+>
+> 不想用云端？把 `answer.backend` 改成 `template`（离线抽取式，零依赖零幻觉）或 `ollama`
+> （本地模型）即可，见 §六。
 
 ---
 
@@ -95,7 +105,7 @@ python -m philo_rag.cli stats
 | `prepare`   | 采集 + 清洗原始语料       | —                                                                                                       |
 | `build`     | 构建索引              | —                                                                                                       |
 | `stats`     | 索引概览与体系结构         | —                                                                                                       |
-| `ask "问题"`  | 溯源回答（自动判定点查询 / 范围查询） | `--strategy auto\|point\|theme` `--no-gate` `--format json` `--out x.md`                                   |
+| `ask "问题"`  | 溯源回答（自动判定点查询 / 范围查询） | `--strategy auto\|point\|theme` `--backend api\|ollama\|template` `--no-gate` `--format json` `--out x.md` |
 | `term "术语"` | 术语卡 + 精确命中 + 语义补充 | `--limit 8` `--format csv`                                                                              |
 | `quote`     | 引文检索（元数据倒排）       | `--philosopher` `--speaker` `--concept` `--era` `--school` `--unit` `--volume` `--keyword` `--limit 30` |
 | `facets`    | 分面统计（筛选维度）        | `--format json`                                                                                         |
@@ -180,9 +190,17 @@ retrieval:                    # 5. 检索
   rerank_max_chars: 256
 
 answer:                       # 6. 生成（溯源回答固定全文检索，不接受筛选条件）
-  backend: template           # template | ollama | api
+  backend: api                # api（云端，默认）| ollama（本地）| template（离线抽取式）
   strategy: auto              # auto 自动判定 | point 强制点查询 | theme 强制范围查询
-  model: qwen2.5:7b
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1  # 阿里云百炼 OpenAI 兼容
+  api_key: ${DASHSCOPE_API_KEY}   # 从 .env / 环境变量读取，不写明文
+  api_model: qwen-plus        # qwen-plus / qwen-max / qwen-turbo …
+  api_max_tokens: 8192        # 输出上限（范围查询要写 1500–4000 字，必须给足）
+  api_timeout: 300            # 单次请求超时（秒）
+  api_retries: 2              # 429 / 5xx / 网络错误自动重试
+  ollama_base: http://localhost:11434
+  ollama_model: qwen2.5:7b    # backend=ollama 时用
+  model: qwen-plus            # 未单独指定 api_model / ollama_model 时的默认模型
   max_context_chunks: 8
   candidate_chunks: 20        # 点查询候选证据数
   max_answer_chars: 700       # 点查询：短，定位一句出处
@@ -238,36 +256,75 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 
 ---
 
-## 六、接上大模型（可选）
+## 六、生成层：默认接云端大模型
 
-默认 `answer.backend: template` 是**离线抽取式**——不调用任何模型，直接从检索结果中筛选并分组原文要点。
-适合快速检索、自检和模型不可用时的降级。它不会真正重写哲学论证，因此复杂问题的逻辑综合能力有限。
+`answer.backend` 三选一，**返回结构完全一致**，切换只改这一行、不需要重建索引：
 
-如果希望回答具备“核心定义—形成机制—理论张力—体系位置”的连贯论述，建议只让本地模型负责最后一步组织，
-而不是让模型重新学习整个语料库。查询时送入模型的仍是少量已检索证据，速度和可控性都明显好于每次重新提取主题。
+| 后端 | 说明 | 依赖 |
+|---|---|---|
+| `api`（默认） | 任意 OpenAI 兼容 `/chat/completions` 接口，默认接阿里云百炼 DashScope | 一把 API Key，无需本机模型 |
+| `ollama` | 本地模型（qwen2.5 / llama3…），数据不出本机 | 常驻 Ollama 服务 |
+| `template` | 离线抽取式：从检索结果中筛选并分组原文要点，不调用任何模型 | 无（自检与降级用） |
 
-想用真正的生成式回答，二选一：
+把生成放到云端，是为了**不再要求项目在本机常驻一个大模型进程**：语料、索引、词典仍在本地，
+只有「把已检索到的少量证据组织成连贯论述」这一步出网。送入模型的始终是已检索好的少量证据，
+而不是整个语料库，因此速度与可控性都好。
+
+### 6.1 配置密钥（不写明文）
+
+密钥只放在项目根目录的 `.env` 里（`.env` 已在 `.gitignore` 中，不会被提交），
+`config.yaml` 用 `${VAR}` 引用，因此可以安全地提交与分享：
+
+```bash
+cp .env.example .env
+# 编辑 .env：
+#   DASHSCOPE_API_KEY=sk-你的key
+```
+
+```yaml
+answer:
+  backend: api
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: ${DASHSCOPE_API_KEY}    # 从 .env / 环境变量读取
+  api_model: qwen-plus
+  api_max_tokens: 8192             # 范围查询要写 1500–4000 字，必须给足输出上限
+```
+
+校验配置：
+
+```bash
+python scripts/check_api.py                  # 发一条最小请求，报告连通性与延迟
+python scripts/check_api.py --prompt "用一句话解释什么是辩证法"
+```
+
+换成任何其它 OpenAI 兼容服务，只改 `api_base` / `api_model` / 环境变量名三处即可
+（如 SiliconFlow、OpenAI、自建网关）。
+
+### 6.2 切回本地或离线
 
 ```yaml
 # A. 本地 Ollama（数据不出本机）
 answer:
   backend: ollama
-  model: qwen2.5:7b
+  ollama_model: qwen2.5:7b
   ollama_base: http://localhost:11434
 ```
 
-
-
 ```yaml
-# B. 任意 OpenAI 兼容接口
+# B. 完全离线（抽取式，不调用任何模型）
 answer:
-  backend: api
-  model: qwen-plus
-  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
-  api_key: sk-xxx
+  backend: template
 ```
 
-三种后端返回结构完全一致，切换只改 `config.yaml` 一行。
+命令行也能临时切换，便于对比同一问题的两种回答：
+
+```bash
+python -m philo_rag.cli ask "什么是字头？" --backend template
+python -m philo_rag.cli ask "什么是字头？" --backend api
+```
+
+> `demo` 自检的检索环节固定用离线 `template` 后端，因此**没配 key 也能跑通链路**；
+> 若配置了 `api` / `ollama`，它会在最后额外做一次真实调用探测。
 
 ---
 
@@ -435,6 +492,7 @@ python -m philo_rag.cli eval --golden my_golden.json --format json
 ```
 philo-rag/
 ├── config.yaml                 全部可调参数
+├── .env.example                密钥模板（复制为 .env 后填 key；.env 已被 git 忽略）
 ├── requirements.txt
 ├── README.md                   本文件
 ├── docs/架构设计.md             技术选型与设计取舍
@@ -450,6 +508,7 @@ philo-rag/
 │   ├── gen_taxonomy.py         从语料生成体系目录
 │   ├── check_speaker.py        引文说话人归因巡检
 │   ├── check_gate.py           问题闸门巡检（放行 / 拦截用例）
+│   ├── check_api.py            生成层 API 连通性自检（校验 key 与端点）
 │   ├── diag_theme.py           主题集中度诊断（top-k 分散度 vs 语料真实分布）
 │   └── diag_compare.py         点查询 vs 范围查询的指标对比
 └── philo_rag/                  Python 包
@@ -618,8 +677,19 @@ python scripts/diag_compare.py   # 点查询 vs 范围查询的指标对比表
 能。默认 `device: cpu`，bge-base 建索引约 20 分钟（6600 余块）；重排开启时首次查询
 要额外加载一次重排模型，之后查询仍为秒级。
 
+**Q：一定要配 API Key 吗？**  
+只有「生成」这一步需要。默认 `answer.backend: api`，没配 key 时提问会给出明确提示
+（`answer.api_key 为空…`），不会抛堆栈。检索、向量化、重排全部在本地，与 key 无关。
+不想用云端就把 `answer.backend` 改成 `template`（离线抽取式）或 `ollama`（本地模型）。
+
+**Q：key 放哪？会被提交出去吗？**  
+放项目根目录的 `.env`（`DASHSCOPE_API_KEY=sk-xxx`），`config.yaml` 里写 `api_key: ${DASHSCOPE_API_KEY}`。
+`.env` 已在 `.gitignore` 中，不会进版本库；`config.yaml` 因此可以安全提交与分享。
+配完用 `python scripts/check_api.py` 校验连通性。
+
 **Q：完全离线可以吗？**  
-可以。模型与语料都已随项目落地，`backend: sentence_transformer` + 本地路径即可。  
+可以。模型与语料都已随项目落地，`embedding.backend: sentence_transformer` + 本地路径即可；
+生成层把 `answer.backend` 设为 `template`（离线抽取式）或 `ollama`（本地模型）即彻底不出网。  
 若只想极速验证链路，把 `embedding.backend` 改成 `hashing`（零依赖、纯词法近似）。
 
 **Q：回答是「资料不足」怎么办？**  
@@ -630,7 +700,7 @@ python scripts/diag_compare.py   # 点查询 vs 范围查询的指标对比表
 `python -m philo_rag.cli stats` 看 `chunk_count`、`unit_count`（应接近 338）与  
 `embedding_backend` 是否与 `config.yaml` 一致。`store/manifest.json` 记录了构建时的后端与维度，  
 避免「索引和配置不匹配」的隐性故障。当前基线：`chunk_count=6630`、`quote_count=1144`、  
-`unit_count=327`、512 维。
+`unit_count=327`、768 维。
 
 **Q：问「你好」为什么直接被跳过了？**  
 这是问题闸门在起作用：寒暄、问系统自身、实时信息、无主题碎片这类问题不适合检索，
