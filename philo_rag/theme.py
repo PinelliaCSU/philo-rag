@@ -22,8 +22,7 @@
    - `literal` 块正文直接出现主题词——次硬（等价于旧「全量关键词扫描」）
    - `semantic` 语义近似但未点名——最软（补充「结构层」关联）
 2. **主题锚定**：主题词先经词典归一为 philosopher / concept / unit；
-   未登录主题（如「精神分析」不在词典里）自动退化为**种子模式**——
-   先检索，再从种子块的高频共现元数据反推锚点，最后回到三层召回。
+   未登录主题只接受正文直接出现的证据，不把语义近似结果或共现元数据当成主题论据。
 3. **单元聚合**：直接命中块按最细数值单元分桶，桶内按块序合并连续块为
    「段落群」，恢复被分块切碎的论证链。
 """
@@ -34,7 +33,6 @@ from typing import Any
 
 from .index import Store
 from .lexicon import Lexicon
-from .retrieve import hybrid_search
 from .schema import Chunk
 
 UNKNOWN_UNIT = "（前言·体例·总纲）"
@@ -89,45 +87,34 @@ def _anchor(lex: Lexicon, topic: str) -> tuple[list[str], list[str], list[str]]:
     return phils, concs, units
 
 
-def _seed_anchor(
-    store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any], seed_k: int
-) -> tuple[list[str], list[str], list[str]]:
-    """未登录主题：先检索，再从种子块的共现元数据反推锚点。
-
-    这是旧「关键词密度聚合」的等价物 —— 先看主题在哪里密集出现，
-    再由那里反推出它实际关联的理论家与概念。
-
-    种子检索只需粗排来反推锚点（统计共现频率），不需要重排精排，
-    这里临时关闭重排以省掉一次完整的交叉编码器推理（~4s）。
-    """
-    seed_cfg = {**cfg, "retrieval": {**cfg.get("retrieval", {}), "rerank": False}}
-    seeds = hybrid_search(store, topic, seed_cfg, lex, top_k=seed_k)
-    pc: collections.Counter[str] = collections.Counter()
-    cc: collections.Counter[str] = collections.Counter()
-    for r in seeds[: max(20, seed_k // 2)]:
-        c: Chunk = r["chunk"]
-        for p in c.philosophers:
-            pc[p] += 1
-        for x in c.concepts:
-            cc[x] += 1
-    phils = [p for p, _ in pc.most_common(4)]
-    concs = [x for x, _ in cc.most_common(4)]
-    return phils, concs, []
-
-
 # --------------------------------------------------------------------------- #
 # 三层召回
 # --------------------------------------------------------------------------- #
 def _collect(
-    store: Store, lex: Lexicon, topic: str, phils: list[str], concs: list[str], units: list[str]
+    store: Store,
+    lex: Lexicon,
+    topic: str,
+    phils: list[str],
+    concs: list[str],
+    units: list[str],
+    *,
+    include_metadata: bool = True,
 ) -> dict[str, list[Chunk]]:
-    """按证据等级收集候选块：meta（元数据）→ literal（字面）→ 语义补充另算。"""
-    literals = {t for t in [topic, *phils, *concs] if t}
+    """按证据等级收集候选块：meta（元数据）→ literal（字面）。
+
+    未登录主题的理论家/概念只是种子检索产生的候选线索，不能反过来扩大为
+    全库的元数据证据；否则一个语义近似结果就会把无关单元全部纳入上下文。
+    """
+    literals = {t for t in ([topic, *phils, *concs] if include_metadata else [topic]) if t}
     pset, cset, uset = set(phils), set(concs), set(units)
     meta: list[Chunk] = []
     literal: list[Chunk] = []
     for c in store.chunks:
-        if (pset & set(c.philosophers)) or (cset & set(c.concepts)) or (uset & set(c.unit_codes())):
+        if include_metadata and (
+            (pset & set(c.philosophers))
+            or (cset & set(c.concepts))
+            or (uset & set(c.unit_codes()))
+        ):
             meta.append(c)
         elif any(t in c.text for t in literals):
             literal.append(c)
@@ -228,7 +215,6 @@ def _pack_group(items: list[Chunk]) -> dict[str, Any]:
 def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) -> dict[str, Any]:
     """主题聚合检索：返回「主题 → 单元分布 → 段落群」的完整结构。"""
     t_cfg = cfg.get("theme", {}) or {}
-    seed_k = int(t_cfg.get("seed_top_k", 60))
     sem_k = int(t_cfg.get("semantic_top_k", 40))
     group_gap = int(t_cfg.get("group_gap", 3))
     max_units = int(t_cfg.get("max_units", 12))
@@ -238,9 +224,19 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
     phils, concs, units = _anchor(lex, topic)
     seed_mode = not (phils or concs or units)
     if seed_mode:
-        phils, concs, units = _seed_anchor(store, lex, topic, cfg, seed_k)
+        # 未登录主题不使用语义种子的共现标签扩大全库召回。共现标签不能证明
+        # 主题在相应单元中被讨论；这里保留空锚点，要求正文直接出现主题词。
+        phils, concs, units = [], [], []
 
-    collected = _collect(store, lex, topic, phils, concs, units)
+    collected = _collect(
+        store,
+        lex,
+        topic,
+        phils,
+        concs,
+        units,
+        include_metadata=not seed_mode,
+    )
     direct = collected["meta"] + collected["literal"]
 
     # 语义补充（semantic_top_k）在之前版本会额外跑一次完整 hybrid_search 做语义近似召回，
@@ -249,6 +245,10 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
     extended: list[Chunk] = []
 
     units_agg = _aggregate_by_unit(store, lex, direct, group_gap)
+    # 只有零散的一次性提及时，不足以支撑「范围查询」的体系分析。
+    # 这类结果交给上层返回“资料不足”，避免模型把孤立句拼成完整谱系。
+    if seed_mode and (not units_agg or max(u["hits"] for u in units_agg) < 2):
+        units_agg = []
     kept = units_agg[:max_units]
 
     # 谱系：直接命中块里与主题共现的其他理论家（上游 / 同代 / 后继的线索）

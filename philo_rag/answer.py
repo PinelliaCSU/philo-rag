@@ -560,6 +560,11 @@ def theme_topic(question: str, lex: Lexicon | None) -> str:
     return _core_topic(question) or (question or "").strip()
 
 
+def _has_direct_topic_match(store: Store, topic: str) -> bool:
+    """语义相似度偏低时，仍放行正文确实出现过的主题。"""
+    return bool(topic) and any(topic in chunk.text for chunk in store.chunks)
+
+
 def answer(
     store: Store,
     lex: Lexicon,
@@ -614,7 +619,8 @@ def answer(
     gate_cfg = cfg.get("gate", {}) if cfg else {}
     if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
         rel_gate = check_relevance(store, question, cfg)
-        if not rel_gate["ok"]:
+        direct_topic = theme_topic(question, lex)
+        if not rel_gate["ok"] and not _has_direct_topic_match(store, direct_topic):
             result = {
                 "question": question,
                 "backend": "gate",
@@ -738,7 +744,8 @@ def answer_stream(
     gate_cfg = cfg.get("gate", {}) if cfg else {}
     if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
         rel_gate = check_relevance(store, question, cfg)
-        if not rel_gate["ok"]:
+        direct_topic = theme_topic(question, lex)
+        if not rel_gate["ok"] and not _has_direct_topic_match(store, direct_topic):
             yield {"type": "meta", "strategy": "gate", "gate": rel_gate, "skipped": True,
                    "answer": skip_answer(rel_gate), "citations": []}
             return
@@ -831,21 +838,25 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
 
 提问：{topic}
 
-请依据下面**已按数值单元聚合好**的资料作答——不要只回答一句话，而要给出该主题在全书中完整的思想面貌。
+请依据下面**已按数值单元聚合好**的资料作答。资料是唯一证据，不要把“检索到同一单元”
+当成该主题被讨论的证明，也不要根据几个并置术语自行补出历史因果、人物立场或理论谱系。
 
 写作要求：
-1. 只使用「资料」中的内容，不引入资料之外的知识；每个论断后用 [单元编号] 或（p页码）标注来源；
-2. **必须按体系结构组织**，而不是按资料出现顺序罗列。固定四节：
+1. 只使用「资料」中的内容，不引入资料之外的知识。只有资料明确说出的内容才能写成事实；
+   资料没有明确支持的内容，必须写“资料未说明”，不能用常识补全；
+2. 只有在资料确实覆盖多个单元时，才按体系结构组织；资料不足时不要强行写满四节：
    ① 体系定位——该主题在全书各卷、各数值单元中的分布与位置，最密集处在哪里；
    ② 核心单元的思想骨架——主题最密集的单元分别讲了什么：核心定义、形成机制、论证路径；
    ③ 衍生与谱系——与主题并置、由主题派生的其他理论家与单元，说明其关系（上游/同代/后继/反对）；
    ④ 张力与批判——书中对该主题的保留意见、内部矛盾、未决问题；
-3. 每个核心单元至少给出 2—3 句有实质内容的论述，**不要只摘一句就换下一个单元**；
-4. 引文照原文保留（用「」标出），不要改写、不要合并不同单元的表述；但**术语不能只堆不解释**——书里的术语第一次出现时，紧跟「（即……）」补一句不超过 25 字的白话解释，解释照「术语速查」的定义，不要自创，同一术语只解释一次；
-5. 开篇先用 2—3 句日常语言交代「这个主题大致在讲什么、结论是什么」，再进入四节结构；全篇用日常语言把关系讲清楚，术语只作锚点，不要写成一层套一层的长定语；
-6. 不要照抄资料里的单元编号或排版标记，引用来源一律用 [单元编号] /（p页码）；
-7. **用 Markdown 排版**：四节标题写成 `### ① 体系定位` 这样的三级标题（只写裸的「① 体系定位」会与正文混作一段），节内小标题用 `####`，需要强调时用 `**…**`；只使用这几种标记，不要用表格、HTML 标签或链接；
-8. 用中文，篇幅约 {min_chars}—{max_chars} 字，宁可详实不要空泛；
+3. 每个核心单元只有在资料直接围绕该主题展开时，才给出 2—3 句论述；
+4. 引文照原文保留（用「」标出），不要改写、不要合并不同单元的表述；
+5. 开篇先用 2—3 句日常语言交代资料实际能支持的结论；不要把“主题与某术语共现”
+   写成“主题就是该术语的表现”；
+6. 不要把“上游/同代/后继/反对”等关系当作默认分类，除非资料明确这样表述；
+7. **用 Markdown 排版**：需要分节时使用 `### ① 体系定位` 这样的三级标题，节内小标题用 `####`，
+   需要强调时用 `**…**`；只使用这几种标记，不要用表格、HTML 标签或链接；
+8. 用中文，篇幅约 {min_chars}—{max_chars} 字；宁可明确说资料不足，也不要用空泛话填满篇幅；
 9. 写完自查一遍：上文凡是用到「术语速查」里的术语，第一次出现处是否都带了「（即……）」解释？漏掉的补上。
 
 术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
@@ -890,6 +901,21 @@ def _theme_sentences(text: str, terms: list[str], max_chars: int) -> str:
         out.append(s)
         used += len(s)
     return "".join(out) or text[:max_chars]
+
+
+def _theme_insufficient_text(topic: str, direct_hits: int = 0) -> str:
+    """主题证据不足时，返回可验证且不扩写的结果。"""
+    if direct_hits:
+        return (
+            f"资料中只找到“{topic}”的零散提及（{direct_hits}处），"
+            "不足以支持对它作全书性的体系分析。下面不把这些孤立提及拼接成"
+            "历史因果、人物立场或理论谱系；如需继续核对，建议改用点查询查看原文片段。"
+        )
+    return (
+        f"资料中没有直接出现“{topic}”，因此目前无法据此判断《哲学大纲》"
+        "如何讨论这一主题。检索到的语义相近内容不能替代直接证据，"
+        "也不能据此推断历史事件、人物立场或理论谱系。"
+    )
 
 
 def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -1013,6 +1039,28 @@ def theme_answer(
     backend = cfg["answer"].get("backend", "template")
     doc_title = store.manifest.get("doc_title", "") or cfg.get("doc", {}).get("title", "")
 
+    if not res["units"]:
+        text = _theme_insufficient_text(topic, res["counts"]["direct"])
+        return {
+            "question": topic,
+            "topic": topic,
+            "kind": "theme",
+            "backend": backend,
+            "strategy": "theme",
+            "skipped": False,
+            "gate": None,
+            "answer": text,
+            "citations": [],
+            "theme": {
+                "seed_mode": res["seed_mode"],
+                "anchors": res["anchors"],
+                "counts": res["counts"],
+                "units": [],
+                "lineage": [],
+                "eras": [],
+            },
+        }
+
     if backend == "template":
         text, citations = render_theme(res, lex, cfg)
     else:
@@ -1089,6 +1137,30 @@ def _theme_answer_stream(
     res = theme_search(store, lex, topic, cfg)
     backend = cfg["answer"].get("backend", "template")
     doc_title = store.manifest.get("doc_title", "") or cfg.get("doc", {}).get("title", "")
+
+    if not res["units"]:
+        text = _theme_insufficient_text(topic, res["counts"]["direct"])
+        theme_meta = {
+            "seed_mode": res["seed_mode"],
+            "anchors": res["anchors"],
+            "counts": res["counts"],
+            "units": [],
+            "lineage": [],
+            "eras": [],
+        }
+        yield {
+            "type": "meta",
+            "strategy": "theme",
+            "backend": backend,
+            "gate": gate,
+            "skipped": False,
+            "citations": [],
+            "theme": theme_meta,
+            "question": question,
+        }
+        yield {"type": "delta", "text": text}
+        yield {"type": "done", "answer": text}
+        return
 
     citations = [
         {

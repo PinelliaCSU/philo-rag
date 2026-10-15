@@ -118,13 +118,21 @@ function mdToHtml(text) {
 /* 流式追加时按帧合并渲染：delta 每秒可上百个，逐个重排会明显卡顿。
    若容器已被 renderAnswer() 换掉（done 时重渲染），这一帧自动作废。 */
 let answerFrame = 0;
+const ANSWER_BOTTOM_THRESHOLD = 24;
+
+function isNearBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= ANSWER_BOTTOM_THRESHOLD;
+}
+
 function paintAnswer(el, text) {
   cancelAnimationFrame(answerFrame);
   answerFrame = requestAnimationFrame(() => {
     if (!el.isConnected) return;
-    el.innerHTML = mdToHtml(text);
     const pane = $('#ask-out');
-    if (pane) pane.scrollTop = pane.scrollHeight;
+    const followLatest = pane && isNearBottom(pane);
+    const scrollTop = pane ? pane.scrollTop : 0;
+    el.innerHTML = mdToHtml(text);
+    if (pane) pane.scrollTop = followLatest ? pane.scrollHeight : scrollTop;
   });
 }
 
@@ -208,10 +216,12 @@ function strategyTag(r) {
 
 function renderAnswer(r) {
   const out = $('#ask-out');
+  const scrollTop = out.scrollTop;
   if (r.skipped) {
     out.innerHTML = `<div class="card"><h3>已跳过检索</h3>
       <div class="ans">${mdToHtml(r.answer)}</div>
       <div class="muted">判定类别：${esc((r.gate || {}).category || '')}</div></div>`;
+    out.scrollTop = scrollTop;
     return;
   }
   let h = '';
@@ -230,7 +240,7 @@ function renderAnswer(r) {
   h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${strategyTag(r)}</span></h3>
     <div class="ans">${mdToHtml(r.answer)}</div></div>`;
   out.innerHTML = h;
-  out.scrollTop = 0;
+  out.scrollTop = scrollTop;
 }
 
 function citeCard(c) {
