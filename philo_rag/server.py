@@ -66,6 +66,7 @@ class AskRequest(BaseModel):
 
     question: str = Field(..., min_length=1)
     strategy: str = Field("auto", pattern="^(auto|point|theme)$")
+    focus: str | None = None
 
 
 def _load(cfg: dict) -> None:
@@ -178,7 +179,7 @@ def create_app(cfg: dict) -> FastAPI:
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
-        return answer_fn(store, lex, req.question, cfg, strategy=req.strategy)
+        return answer_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus)
 
     @app.post("/api/ask_stream")
     async def ask_stream(req: AskRequest):
@@ -199,7 +200,7 @@ def create_app(cfg: dict) -> FastAPI:
         store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
 
         def event_gen():
-            for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy):
+            for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus):
                 yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
 
         # no-cache / X-Accel-Buffering：避免浏览器与反向代理再次把 SSE 攒起来

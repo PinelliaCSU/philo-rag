@@ -120,6 +120,7 @@ PROMPT_TEMPLATE_QUOTE_FIRST = """你是一位严谨的哲学文献编辑，正�
 THEME_PROMPT_QUOTE_FIRST = """你是一位严谨的哲学文献编辑，正在为《{doc_title}》整理一份主题为「{topic}」的**原文优先可信编辑稿**。
 
 资料已按数值单元聚合好，每个证据段落都有编号（[E01] 这类）。资料是唯一证据。
+{focus_guide}
 
 工作原则：
 1. 资料里的「原文」就是正文：逐字照录，不得改写、扩写、缩写、拼贴或合并不同出处的表述；不要把“检索到同一单元”当成主题被讨论的证明；
@@ -190,6 +191,7 @@ PROMPT_TEMPLATE_QUOTE_FIRST_STREAM = """你是一位严谨的哲学文献编辑�
 THEME_PROMPT_QUOTE_FIRST_STREAM = """你是一位严谨的哲学文献编辑，正在为《{doc_title}》整理一份主题为「{topic}」的**原文优先可信编辑稿**。
 
 资料已按数值单元聚合好，每个证据段落都有编号（[E01] 这类）。资料是唯一证据。
+{focus_guide}
 
 工作原则：
 1. 资料里的「原文」就是正文：逐字照录，不得改写、扩写、缩写、拼贴或合并不同出处的表述；不要把“检索到同一单元”当成主题被讨论的证明；
@@ -245,3 +247,18 @@ def point_prompt(cfg: dict[str, Any]) -> str:
 
 def theme_prompt(cfg: dict[str, Any]) -> str:
     return THEME_PROMPT_QUOTE_FIRST if prompt_style(cfg) == "quote_first" else THEME_PROMPT_LEGACY
+
+
+# focus_guide：把范围查询的追问焦点翻译成一句写作侧重提示。
+# 只注入 quote_first 两套 theme 提示词；未知或为空时返回空串（占位符留空）。
+_FOCUS_GUIDES: dict[str, str] = {
+    "position": "本次侧重：体系定位（第①节详写，其余节从简）。",
+    "mechanism": "本次侧重：核心单元的思想骨架与论证机制（第②节详写，其余节从简）。",
+    "lineage": "本次侧重：衍生与谱系（第③节详写，其余节从简）。",
+    "critique": "本次侧重：张力与批判（第④节详写，其余节从简）。",
+}
+
+
+def focus_guide(focus: str | None) -> str:
+    """按 focus 生成一句话侧重提示；未知或为空时返回空串。"""
+    return _FOCUS_GUIDES.get((focus or "").strip().lower(), "")

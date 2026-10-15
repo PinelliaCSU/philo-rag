@@ -78,6 +78,7 @@ answer:
   #   template —— 离线抽取式，不调用任何模型（用于自检与降级）
   backend: api
   strategy: auto            # auto 按问题自动判定 | point 强制点查询 | theme 强制范围查询
+  clarify_broad: true       # 裸主题提问（如「黑格尔」「谈谈精神分析」）先反问方向，不直接生成长文
 
   # —— 云端 API（backend: api）——
   # 默认阿里云百炼（DashScope）OpenAI 兼容模式；换任何 OpenAI 兼容服务只改这三行。

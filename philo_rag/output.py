@@ -63,6 +63,11 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
              "concepts", "start", "end", "page", "text"],
         )
     if fmt == "txt":
+        if res.get("strategy") == "clarify":
+            lines = [f"问题：{res.get('topic', '')}"]
+            for opt in res.get("options") or []:
+                lines.append(f"- {opt.get('label', '')}：{opt.get('question', '')}")
+            return "\n".join(lines)
         lines: list[str] = []
         theme = res.get("theme")
         if theme:
@@ -86,6 +91,11 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
         return "\n".join(lines)
 
     # md（默认）
+    if res.get("strategy") == "clarify":
+        lines = ["## 问题", "", str(res.get("topic", "")), "", "## 请选择方向"]
+        for opt in res.get("options") or []:
+            lines.append(f"- **{opt.get('label', '')}**：{opt.get('question', '')}")
+        return "\n".join(lines) + "\n"
     if res.get("skipped"):
         # 问题闸门判定不适合检索：没有回答与引用，只说明跳过原因
         gate = res.get("gate") or {}

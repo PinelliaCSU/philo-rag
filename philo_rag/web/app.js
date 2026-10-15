@@ -425,7 +425,7 @@ async function toggleCite(btn) {
   refreshCiteToggle(citeEl);
 }
 
-async function doAsk(q, strategy) {
+async function doAsk(q, strategy, focus) {
   const strat = strategy || state.strategy;
   const out = $('#ask-out');
   out.innerHTML = '<div class="card muted">检索并生成中… <b id="ask-t">0.0s</b></div>';
@@ -438,7 +438,7 @@ async function doAsk(q, strategy) {
     const r = await fetch('/api/ask_stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, strategy: strat }),
+      body: JSON.stringify({ question: q, strategy: strat, focus }),
     });
     if (!r.ok) throw new Error(await errText(r));
 
@@ -448,6 +448,7 @@ async function doAsk(q, strategy) {
     let meta = null;
     let answerText = '';
     let answerEl = null;
+    let clarify = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -468,17 +469,27 @@ async function doAsk(q, strategy) {
           answerText = '';
           state.citePage = 0;
           state.ask = event;
+          if (event.strategy === 'clarify') {
+            clarify = true;
+            answerEl = null;
+            renderClarifyCard(event);
+            $('#cite-cards').innerHTML = '<div class="muted">—</div>';
+            $('#cite-pager').innerHTML = '';
+            continue;
+          }
           // 构建回答框架：先空容器，后续 delta 逐帧追加渲染
           renderAnswerSkeleton(event);
           renderCitations(event);
           answerEl = $('#ask-answer-text');
         } else if (event.type === 'delta') {
+          if (clarify) continue;
           answerText += event.text;
           if (answerEl) paintAnswer(answerEl, answerText);
         } else if (event.type === 'done') {
           // 最终清理（去掉模型可能输出的来源行）。sections/annotations 在
           // meta 阶段被后端置空，done 事件里才是解析后的真值，必须一并合入，
           // 否则最终渲染会覆盖掉流式期间已显示的「术语注解」。
+          if (clarify) continue;
           if (meta) {
             meta.answer = event.answer;
             state.ask = {
@@ -497,11 +508,17 @@ async function doAsk(q, strategy) {
 
     // 如果没有收到任何事件（如网关跳过），回退到旧接口
     if (!meta) {
-      const r2 = await jpost('/api/ask', { question: q, strategy: strat });
+      const r2 = await jpost('/api/ask', { question: q, strategy: strat, focus });
       state.ask = r2;
       state.citePage = 0;
-      renderAnswer(r2);
-      renderCitations(r2);
+      if (r2.strategy === 'clarify') {
+        renderClarifyCard(r2);
+        $('#cite-cards').innerHTML = '<div class="muted">—</div>';
+        $('#cite-pager').innerHTML = '';
+      } else {
+        renderAnswer(r2);
+        renderCitations(r2);
+      }
     }
   } catch (e) {
     out.innerHTML = `<div class="err">${esc(e.message)}</div>`;
@@ -537,6 +554,24 @@ function renderAnswerSkeleton(r) {
   h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${tag}</span></h3>
     <div class="ans" id="ask-answer-text"></div></div>`;
   out.innerHTML = h;
+  out.scrollTop = 0;
+}
+
+/* 宽泛主题澄清卡：meta.strategy === 'clarify' 时渲染，忽略后续 delta/done */
+function renderClarifyCard(r) {
+  const out = $('#ask-out');
+  const opts = (r.options || []).map(o => `
+    <button type="button" class="clarify-option"
+      data-q="${esc(o.question)}" data-s="${esc(o.strategy)}" data-f="${esc(o.focus)}">
+      <span class="clarify-label">${esc(o.label)}</span>
+      <span class="muted">${esc(o.question)}</span>
+    </button>`).join('');
+  out.innerHTML = `<div class="card clarify-card">
+    <h3>追问 <span class="muted heading-note">· 宽泛主题</span></h3>
+    <div class="muted clarify-hint">这个问题比较宽泛，你想先看哪个方向？</div>
+    <div class="clarify-topic">主题：<b>${esc(r.topic)}</b></div>
+    <div class="clarify-options">${opts}</div>
+  </div>`;
   out.scrollTop = 0;
 }
 
@@ -933,6 +968,8 @@ $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ask-btn').
 document.addEventListener('click', e => {
   const ref = e.target.closest('.cite-ref');
   if (ref) { jumpToCite(ref.dataset.ref); return; }
+  const co = e.target.closest('.clarify-option');
+  if (co) { doAsk(co.dataset.q, co.dataset.s, co.dataset.f); return; }
   const term = e.target.closest('.term-link');
   if (term) { openConcept(term.dataset.term); return; }
   const tgl = e.target.closest('.cite-toggle');

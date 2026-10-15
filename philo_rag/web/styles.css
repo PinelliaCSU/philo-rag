@@ -602,6 +602,44 @@ button.ghost:hover:not(:disabled) {
 }
 .ans .term-link:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent); }
 
+/* 宽泛主题澄清卡：裸主题提问先选方向，不直接生成长文 */
+.clarify-card { padding-top: 2px; }
+.clarify-hint { margin-bottom: 14px; }
+.clarify-topic { margin-bottom: 16px; }
+.clarify-topic b { color: var(--color-accent); font-weight: 600; }
+.clarify-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: var(--reading-width);
+}
+.clarify-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 14px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+.clarify-option:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+}
+.clarify-option .clarify-label {
+  color: var(--color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.clarify-option .muted { font-size: 12px; }
+
 /* 体系地图：四个字头 × 四个位面的坐标视图。 */
 .map-body { padding: 8px 0 36px; }
 .map-hero { padding-block: 17px 23px; border-bottom: 1px solid var(--color-text); }

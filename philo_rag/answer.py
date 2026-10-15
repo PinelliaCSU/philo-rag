@@ -40,7 +40,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Generator
 
-from .gate import check_question, check_relevance, skip_answer
+from .gate import check_question, check_relevance, normalize, skip_answer
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import _definition_terms, hybrid_search
@@ -51,6 +51,13 @@ from .schema import Chunk
 # 对「卡片联动」场景（用户在术语卡之间跳转、反复查看相近问题）收益极大。
 _ANSWER_CACHE: collections.OrderedDict[tuple[str, str], dict[str, Any]] = collections.OrderedDict()
 _ANSWER_CACHE_MAX = 64
+
+
+def _cache_put(key: tuple[str, str], result: dict[str, Any]) -> None:
+    _ANSWER_CACHE[key] = result
+    _ANSWER_CACHE.move_to_end(key)
+    while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
+        _ANSWER_CACHE.popitem(last=False)
 
 # 证据整备与提示词已拆分到 answer_evidence / answer_prompt（见对应模块）
 from .answer_evidence import (
@@ -75,6 +82,7 @@ from .answer_prompt import (
     THEME_PROMPT_LEGACY,
     THEME_PROMPT_QUOTE_FIRST,
     THEME_PROMPT_QUOTE_FIRST_STREAM,
+    focus_guide,
     point_prompt,
     prompt_style,
     theme_prompt,
@@ -354,6 +362,7 @@ def _theme_generate(
     lex: Lexicon,
     cfg: dict[str, Any],
     backend: str,
+    focus: str | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """范围查询的 LLM 生成：quote_first 走结构化 JSON，legacy 走自由文本。"""
     style = prompt_style(cfg)
@@ -366,6 +375,7 @@ def _theme_generate(
             glossary=glossary,
             context=res["context"],
             bridge_max_chars=_bridge_max(cfg),
+            focus_guide=focus_guide(focus),
         )
     else:
         prompt = THEME_PROMPT_LEGACY.format(
@@ -655,7 +665,106 @@ def theme_topic(question: str, lex: Lexicon | None) -> str:
         concs = sorted(lex.iter_concepts(question), key=lambda x: x[0])
         if concs:
             return concs[0][2]
+        themes = lex.match_themes(question)
+        if themes:
+            return str(themes[0].get("name") or "")
     return _core_topic(question) or (question or "").strip()
+
+
+# --------------------------------------------------------------------------- #
+# 宽泛主题澄清（clarify）：裸主题提问的前置聚焦选择器
+# --------------------------------------------------------------------------- #
+# 「谈谈黑格尔」「黑格尔」这类无修饰裸主题，不直接跑昂贵的范围查询，
+# 先反问方向；用户点选后带 strategy + focus 重新走原链路。
+RE_CLARIFY_BARE = re.compile(
+    r"^(?:介绍一下|介绍下|说说看|谈谈|讲讲|说说|聊聊)?\s*(?P<topic>.{1,12})$"
+)
+# 含这些限定字的不算裸主题：什么/怎么/为什么/如何/哪/吗/呢/？/在/与/和 …
+RE_CLARIFY_BLOCKED = re.compile(r"[什么怎么为什么如何哪吗呢？?在与和]")
+
+
+def _clarify_bare_topic(question: str) -> str:
+    """裸主题形态检查：可带「谈谈/讲讲…」引导词，余下 1—12 字且无限定字。"""
+    q = normalize(question)
+    m = RE_CLARIFY_BARE.match(q)
+    if not m:
+        return ""
+    topic = m.group("topic").strip()
+    if not topic or RE_CLARIFY_BLOCKED.search(topic):
+        return ""
+    return topic
+
+
+def _topic_anchored(topic: str, lex: Lexicon | None) -> str:
+    """整词锚定词典（理论家/概念/主题层），返回标准名；未锚定返回空串。
+
+    必须整词命中、不能用子串命中：这样「精神分析的发展」不会被「精神分析」放行。
+    """
+    if not topic or lex is None:
+        return ""
+    for std, info in lex.philosophers.items():
+        if topic == std or topic in info.get("aliases", []):
+            return std
+    for std, info in lex.concepts.items():
+        if topic == std or topic in info.get("aliases", []):
+            return std
+    for theme in lex.themes:
+        if topic == theme.get("name") or topic in theme.get("aliases", []):
+            return str(theme.get("name") or topic)
+    return ""
+
+
+def clarify_broad_topic(
+    question: str,
+    strategy: str = "auto",
+    cfg: dict[str, Any] | None = None,
+    lex: Lexicon | None = None,
+    backend: str = "api",
+) -> str | None:
+    """宽泛裸主题是否先澄清：返回应澄清的主题词，否则返回 None。
+
+    全部条件同时满足才澄清：
+      1. answer.clarify_broad 开启（默认 true）；
+      2. 调用方未显式指定 point/theme；
+      3. classify_question 自动判定为 theme；
+      4. 问题是「谈谈/讲讲… + 裸主题」形态，且主题词能整词锚定词典；
+      5. 离线 template 后端不澄清（cli build 自检依赖 theme 结果）。
+    """
+    a_cfg = (cfg or {}).get("answer", {}) or {}
+    if not a_cfg.get("clarify_broad", True):
+        return None
+    s = (strategy or "").strip().lower()
+    if s not in ("", "auto"):
+        return None
+    if backend == "template":
+        return None
+    if classify_question(question, lex) != "theme":
+        return None
+    raw = _clarify_bare_topic(question)
+    if not raw:
+        return None
+    return _topic_anchored(raw, lex) or None
+
+
+def _clarify_options(topic: str) -> list[dict[str, str]]:
+    """澄清卡片的 5 个固定方向；question 里的主题词按实际 topic 填入。"""
+    return [
+        {"id": "definition", "label": "核心定义",
+         "question": f"{topic}的核心思想是什么？",
+         "strategy": "point", "focus": "definition"},
+        {"id": "position", "label": "体系位置",
+         "question": f"{topic}在主义主义体系中的位置",
+         "strategy": "theme", "focus": "position"},
+        {"id": "mechanism", "label": "思想机制 / 论证骨架",
+         "question": f"{topic}的思想机制与论证路径",
+         "strategy": "theme", "focus": "mechanism"},
+        {"id": "lineage", "label": "谱系与后继",
+         "question": f"{topic}的谱系与后继影响",
+         "strategy": "theme", "focus": "lineage"},
+        {"id": "critique", "label": "张力与批判",
+         "question": f"书中对{topic}的张力与批判",
+         "strategy": "theme", "focus": "critique"},
+    ]
 
 
 def _has_direct_topic_match(store: Store, topic: str) -> bool:
@@ -669,6 +778,7 @@ def answer(
     question: str,
     cfg: dict[str, Any],
     strategy: str = "auto",
+    focus: str | None = None,
 ) -> dict[str, Any]:
     """问答主链路：问题闸门 → 类型判定 → 检索 → 组装上下文 → 生成 → 附引用。
 
@@ -704,10 +814,7 @@ def answer(
             "answer": skip_answer(gate),
             "citations": [],
         }
-        _ANSWER_CACHE[cache_key] = result
-        _ANSWER_CACHE.move_to_end(cache_key)
-        while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
-            _ANSWER_CACHE.popitem(last=False)
+        _cache_put(cache_key, result)
         return result
 
     # ---- ①b 语义相关性格挡：无锚点、又和语料相似度过低的问题也直接跳过 ----
@@ -734,21 +841,32 @@ def answer(
                 _ANSWER_CACHE.popitem(last=False)
             return result
 
+    # ---- ①c 宽泛主题澄清：裸主题先选方向，短路在检索/生成之前 ----
+    backend = cfg["answer"].get("backend", "template")
+    clarify_topic = clarify_broad_topic(question, strategy, cfg, lex, backend=backend)
+    if clarify_topic:
+        result = {
+            "strategy": "clarify",
+            "topic": clarify_topic,
+            "skipped": False,
+            "citations": [],
+            "options": _clarify_options(clarify_topic),
+            "gate": gate,
+        }
+        _cache_put(cache_key, result)
+        return result
+
     # ---- ② 类型判定：同一个入口，按问题诉求选择召回策略 ----
     strat = (strategy or "auto").lower()
     if strat not in ("point", "theme"):
         strat = classify_question(question, lex)
 
     if strat == "theme":
-        res = theme_answer(store, lex, theme_topic(question, lex), cfg)
+        res = theme_answer(store, lex, theme_topic(question, lex), cfg, focus=focus)
         res.update(question=question, strategy="theme", gate=gate, skipped=False)
-        _ANSWER_CACHE[cache_key] = res
-        _ANSWER_CACHE.move_to_end(cache_key)
-        while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
-            _ANSWER_CACHE.popitem(last=False)
+        _cache_put(cache_key, res)
         return res
 
-    backend = cfg["answer"].get("backend", "template")
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
     candidate_ctx = int(cfg["answer"].get("candidate_chunks", max(max_ctx, 16)))
 
@@ -800,6 +918,7 @@ def answer_stream(
     question: str,
     cfg: dict[str, Any],
     strategy: str = "auto",
+    focus: str | None = None,
 ):
     """流式问答：先完成闸门 + 检索 + 引用组装（yield meta），再流式生成回答正文（yield delta）。
 
@@ -828,16 +947,25 @@ def answer_stream(
                    "answer": skip_answer(rel_gate), "citations": []}
             return
 
+    # ---- ①c 宽泛主题澄清：裸主题先选方向，短路在检索/生成之前 ----
+    backend = cfg["answer"].get("backend", "template")
+    clarify_topic = clarify_broad_topic(question, strategy, cfg, lex, backend=backend)
+    if clarify_topic:
+        yield {"type": "meta", "strategy": "clarify", "topic": clarify_topic,
+               "skipped": False, "citations": [],
+               "options": _clarify_options(clarify_topic), "gate": gate}
+        yield {"type": "done", "answer": ""}
+        return
+
     # ---- ② 类型判定 ----
     strat = (strategy or "auto").lower()
     if strat not in ("point", "theme"):
         strat = classify_question(question, lex)
 
     if strat == "theme":
-        yield from _theme_answer_stream(store, lex, theme_topic(question, lex), cfg, question, gate)
+        yield from _theme_answer_stream(store, lex, theme_topic(question, lex), cfg, question, gate, focus=focus)
         return
 
-    backend = cfg["answer"].get("backend", "template")
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
     candidate_ctx = int(cfg["answer"].get("candidate_chunks", max(max_ctx, 16)))
 
@@ -1123,7 +1251,8 @@ def render_theme(
 
 
 def theme_answer(
-    store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]
+    store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any],
+    focus: str | None = None,
 ) -> dict[str, Any]:
     """范围查询策略：主题聚合检索 → 结构化上下文 → 生成 → 附引用。
 
@@ -1164,7 +1293,7 @@ def theme_answer(
     if backend == "template":
         text, citations, sections, annotations = render_theme(res, lex, cfg)
     else:
-        text, sections, annotations = _theme_generate(topic, res, doc_title, lex, cfg, backend)
+        text, sections, annotations = _theme_generate(topic, res, doc_title, lex, cfg, backend, focus=focus)
         citations = _theme_citations(res, doc_title)
 
     return {
@@ -1203,6 +1332,7 @@ def theme_answer(
 def _theme_answer_stream(
     store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any],
     question: str, gate: dict[str, Any],
+    focus: str | None = None,
 ):
     """范围查询的流式生成，被 answer_stream 调用。"""
     from .theme import theme_search
@@ -1270,6 +1400,7 @@ def _theme_answer_stream(
             glossary=build_glossary(topic, [res["context"]], lex),
             context=res["context"],
             bridge_max_chars=_bridge_max(cfg),
+            focus_guide=focus_guide(focus),
         )
         yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
                "skipped": False, "citations": citations, "theme": theme_meta,
