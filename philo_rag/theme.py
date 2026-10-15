@@ -17,10 +17,10 @@
 
 设计要点：
 
-1. **三层召回**，由硬到软，各自标注证据等级：
+1. **两层可核对召回**，由硬到软：
    - `meta`   元数据命中（词典把主题归一后，块标签含该主题）——最硬
    - `literal` 块正文直接出现主题词——次硬（等价于旧「全量关键词扫描」）
-   - `semantic` 语义近似但未点名——最软（补充「结构层」关联）
+   语义近似结果只用于相关性闸门，不作为范围回答的事实证据。
 2. **主题锚定**：主题词先经词典归一为 philosopher / concept / unit；
    未登录主题只接受正文直接出现的证据，不把语义近似结果或共现元数据当成主题论据。
 3. **单元聚合**：直接命中块按最细数值单元分桶，桶内按块序合并连续块为
@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import collections
+import re
 from typing import Any
 
 from .index import Store
@@ -55,7 +56,7 @@ def _filter_relevant_sentences(text: str, terms: list[str], max_chars: int) -> s
             break
         # 保留含主题词的句子，或定义/转折标记句
         if any(t in s for t in terms) or any(
-            m in s for m in ("即", "是指", "意味着", "所谓", "因为", "因此", "但是", "然而")
+            m in s for m in ("即", "是指", "意味着", "所谓", "定义为", "指的是")
         ):
             picked.append(s)
             used += len(s)
@@ -119,6 +120,88 @@ def _collect(
         elif any(t in c.text for t in literals):
             literal.append(c)
     return {"meta": meta, "literal": literal}
+
+
+def _evidence_type(text: str, terms: list[str]) -> str:
+    """给段落群标注证据角色；角色用于覆盖式选段，不代表作者立场。"""
+    sentences = re.findall(r"[^。！？；\n]+[。！？；]?", text)
+    body = " ".join(sentences)
+    has_term = any(term in body for term in terms)
+    if any(
+        term and re.search(
+            rf"{re.escape(term)}.{{0,40}}(?:即|是指|意味着|定义为|指的是|包含)",
+            body,
+        )
+        for term in terms
+    ) or "所谓" in body:
+        return "definition"
+    if any(marker in body for marker in ("但是", "然而", "不能", "问题在于", "缺陷", "局限", "反而")):
+        return "contrast"
+    if any(marker in body for marker in ("因为", "由于", "通过", "从而", "因此", "形成", "产生", "机制")):
+        return "mechanism"
+    if has_term and any(marker in body for marker in ("主张", "认为", "指出", "核心", "本质", "意味着")):
+        return "claim"
+    if has_term:
+        return "example"
+    return "background"
+
+
+def _group_score(group: dict[str, Any]) -> float:
+    weights = {
+        "definition": 5.0,
+        "claim": 4.0,
+        "mechanism": 3.5,
+        "contrast": 3.5,
+        "example": 2.0,
+        "background": 0.5,
+    }
+    return weights[group["evidence_type"]] + min(group["chars"], 1200) / 1200
+
+
+def _select_groups(groups: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """优先覆盖定义、论证/机制、限制，再用高分证据补足。"""
+    if len(groups) <= limit:
+        return groups
+    selected: list[dict[str, Any]] = []
+    wanted = ("definition", "claim", "mechanism", "contrast")
+    for kind in wanted:
+        candidates = [g for g in groups if g["evidence_type"] == kind and g not in selected]
+        if candidates and len(selected) < limit:
+            selected.append(max(candidates, key=_group_score))
+    remaining = [g for g in groups if g not in selected]
+    selected.extend(sorted(remaining, key=_group_score, reverse=True)[: max(0, limit - len(selected))])
+    return sorted(selected, key=lambda g: g["start"])
+
+
+def _select_units(units: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """先保留高证据单元，再尽量覆盖不同卷与证据类型。"""
+    ranked = sorted(
+        units,
+        key=lambda u: (
+            -max((_group_score(g) for g in u["groups"]), default=0),
+            -u["hits"],
+            -u["density"],
+            u["code"],
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    volumes: set[str] = set()
+    kinds: set[str] = set()
+    while ranked and len(selected) < limit:
+        best = max(
+            ranked,
+            key=lambda u: (
+                (2 if u["volume"] and u["volume"] not in volumes else 0)
+                + (1 if any(g["evidence_type"] not in kinds for g in u["groups"]) else 0),
+                max((_group_score(g) for g in u["groups"]), default=0),
+                u["hits"],
+            ),
+        )
+        selected.append(best)
+        ranked.remove(best)
+        volumes.add(best["volume"])
+        kinds.update(g["evidence_type"] for g in best["groups"])
+    return sorted(selected, key=lambda u: (-u["hits"], -u["density"], u["code"]))
 
 
 def _aggregate_by_unit(
@@ -206,6 +289,8 @@ def _pack_group(items: list[Chunk]) -> dict[str, Any]:
         "page_end": max(c.page for c in items),
         "chunk_ids": [c.chunk_id for c in items],
         "quotes": quotes,
+        "evidence_type": "",
+        "evidence_score": 0.0,
     }
 
 
@@ -215,7 +300,6 @@ def _pack_group(items: list[Chunk]) -> dict[str, Any]:
 def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) -> dict[str, Any]:
     """主题聚合检索：返回「主题 → 单元分布 → 段落群」的完整结构。"""
     t_cfg = cfg.get("theme", {}) or {}
-    sem_k = int(t_cfg.get("semantic_top_k", 40))
     group_gap = int(t_cfg.get("group_gap", 3))
     max_units = int(t_cfg.get("max_units", 12))
     max_group_chars = int(t_cfg.get("max_group_chars", 1500))
@@ -245,11 +329,16 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
     extended: list[Chunk] = []
 
     units_agg = _aggregate_by_unit(store, lex, direct, group_gap)
+    topic_terms = [t for t in [topic, *phils, *concs] if t]
+    for unit in units_agg:
+        for group in unit["groups"]:
+            group["evidence_type"] = _evidence_type(group["text"], topic_terms)
+            group["evidence_score"] = round(_group_score(group), 3)
     # 只有零散的一次性提及时，不足以支撑「范围查询」的体系分析。
     # 这类结果交给上层返回“资料不足”，避免模型把孤立句拼成完整谱系。
     if seed_mode and (not units_agg or max(u["hits"] for u in units_agg) < 2):
         units_agg = []
-    kept = units_agg[:max_units]
+    kept = _select_units(units_agg, max_units)
 
     # 谱系：直接命中块里与主题共现的其他理论家（上游 / 同代 / 后继的线索）
     pc: collections.Counter[str] = collections.Counter()
@@ -268,19 +357,46 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
     used = 0
     budget = int(t_cfg.get("context_budget", 16000))
     # 主题词集合，用于句子筛选
-    topic_terms = [t for t in [topic, *phils, *concs] if t]
+    evidence: list[dict[str, Any]] = []
+    evidence_no = 0
     for u in kept:
+        u["selected_groups"] = _select_groups(u["groups"], groups_per_unit)
         head = f"### 单元 {u['code']} {u['title']}｜{u['volume']}｜命中 {u['hits']} 块"
         context_parts.append(head)
         used += len(head)
-        for g in u["groups"][:groups_per_unit]:
+        for g in u["selected_groups"]:
             text = g["text"]
             # 句子级筛选：保留含主题词的句子，去掉无关句
             if topic_terms and len(text) > 400:
                 text = _filter_relevant_sentences(text, topic_terms, max_group_chars)
             elif len(text) > max_group_chars:
                 text = text[:max_group_chars].rstrip() + "……"
-            context_parts.append(f"（p{g['page']}）{text}")
+            evidence_no += 1
+            evidence_id = f"E{evidence_no:02d}"
+            context_parts.append(
+                f"[证据 {evidence_id}]\n"
+                f"单元：{u['code'] or '前言'} {u['title']}\n"
+                f"页码：{g['page']}–{g['page_end']}\n"
+                f"证据类型：{g['evidence_type']}\n"
+                f"正文：{text}"
+            )
+            evidence.append(
+                {
+                    "id": evidence_id,
+                    "unit": u["code"],
+                    "unit_title": u["title"],
+                    "volume": u["volume"],
+                    "page": g["page"],
+                    "page_end": g["page_end"],
+                    "start": g["start"],
+                    "end": g["end"],
+                    "chunk_id": g["chunk_ids"][0] if g["chunk_ids"] else "",
+                    "chunk_ids": g["chunk_ids"],
+                    "text": text,
+                    "evidence_type": g["evidence_type"],
+                    "score": g["evidence_score"],
+                }
+            )
             used += len(text)
             if used > budget:
                 break
@@ -305,6 +421,7 @@ def theme_search(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) ->
         "eras": ec.most_common(10),
         "context": "\n\n".join(context_parts),
         "context_chars": used,
+        "evidence": evidence,
     }
 
 
@@ -332,4 +449,15 @@ def theme_payload(store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any]) -
         "lineage": res["lineage"],
         "eras": res["eras"],
         "context_chars": res["context_chars"],
+        "evidence": [
+            {
+                "id": e["id"],
+                "unit": e["unit"],
+                "page": e["page"],
+                "page_end": e["page_end"],
+                "evidence_type": e["evidence_type"],
+                "score": e["score"],
+            }
+            for e in res["evidence"]
+        ],
     }

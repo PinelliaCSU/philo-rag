@@ -844,6 +844,9 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
 写作要求：
 1. 只使用「资料」中的内容，不引入资料之外的知识。只有资料明确说出的内容才能写成事实；
    资料没有明确支持的内容，必须写“资料未说明”，不能用常识补全；
+   每个实质性论断后标注实际证据编号，如 [E01]；不要自造不存在的编号；
+   `definition/claim/mechanism/contrast/example/background` 是证据类型：
+   background 只能说明“资料提到”，不能单独推出因果、立场或谱系；
 2. 只有在资料确实覆盖多个单元时，才按体系结构组织；资料不足时不要强行写满四节：
    ① 体系定位——该主题在全书各卷、各数值单元中的分布与位置，最密集处在哪里；
    ② 核心单元的思想骨架——主题最密集的单元分别讲了什么：核心定义、形成机制、论证路径；
@@ -854,6 +857,7 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
 5. 开篇先用 2—3 句日常语言交代资料实际能支持的结论；不要把“主题与某术语共现”
    写成“主题就是该术语的表现”；
 6. 不要把“上游/同代/后继/反对”等关系当作默认分类，除非资料明确这样表述；
+   引用只使用证据编号 [E01] 这类格式，不要自行编造页码或单元引用；
 7. **用 Markdown 排版**：需要分节时使用 `### ① 体系定位` 这样的三级标题，节内小标题用 `####`，
    需要强调时用 `**…**`；只使用这几种标记，不要用表格、HTML 标签或链接；
 8. 用中文，篇幅约 {min_chars}—{max_chars} 字；宁可明确说资料不足，也不要用空泛话填满篇幅；
@@ -862,7 +866,7 @@ THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_
 术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
 {glossary}
 
-资料（已按单元聚合；标题行给出单元编号、标题、命中块数）：
+资料（已按单元聚合；每段均有证据编号与证据类型）：
 {context}
 
 主题：{topic}
@@ -918,6 +922,35 @@ def _theme_insufficient_text(topic: str, direct_hits: int = 0) -> str:
     )
 
 
+def _theme_citations(res: dict[str, Any], doc_title: str) -> list[dict[str, Any]]:
+    """为实际送入生成器的证据建立一一对应的前端引用。"""
+    anchors = res["anchors"]
+    return [
+        {
+            "n": i,
+            "evidence_id": evidence["id"],
+            "chunk_id": evidence["chunk_id"],
+            "citation": (
+                f"{doc_title} · {evidence['unit']} {evidence['unit_title']} · "
+                f"第 {evidence['page']}–{evidence['page_end']} 页 · {evidence['evidence_type']}"
+            ),
+            "unit": evidence["unit"],
+            "unit_title": evidence["unit_title"],
+            "volume": evidence["volume"],
+            "page": evidence["page"],
+            "start": evidence["start"],
+            "end": evidence["end"],
+            "chunk_type": "body",
+            "philosophers": anchors["philosophers"],
+            "concepts": anchors["concepts"],
+            "eras": [],
+            "text": evidence["text"][:1200],
+            "score": evidence["score"],
+        }
+        for i, evidence in enumerate(res.get("evidence", []), start=1)
+    ]
+
+
 def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """离线（template 后端）范围查询：按单元分节，每节给主题句群 + 关键引文。
 
@@ -959,45 +992,28 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
     lines.append("")
 
     # ---- 二、核心单元 ----
-    citations: list[dict[str, Any]] = []
     lines.append(f"### 二、核心单元（按命中密度，前 {len(core)} 个）")
     for u in core:
         head = f"#### {u['code']} {u['title']}" if u["code"] else f"#### {u['title']}"
         lines.append(head)
         lines.append(f"*{u['volume'] or '—'}｜命中 {u['hits']}/{u['total']} 块（密度 {u['density']}）*")
         lines.append("")
-        body = _theme_sentences(u["groups"][0]["text"] if u["groups"] else "", terms, per_unit)
+        groups = u.get("selected_groups") or u["groups"]
+        body = _theme_sentences(
+            "\n".join(g["text"] for g in groups),
+            terms,
+            per_unit,
+        )
         lines.append(body)
         # 该单元内若有引文块，补一条关键引文（专题稿的「金句」来源）。
         # 优先挑长度适中（10–140 字）且主题词密度高的，避免选出被切碎的残句。
-        qs = [q for g in u["groups"] for q in g["quotes"] if 10 <= len(q) <= 140]
+        qs = [q for g in groups for q in g["quotes"] if 10 <= len(q) <= 140]
         if qs:
             best = max(qs, key=lambda q: sum(1 for t in terms if t in q) * 100 + len(q))
             lines.append(f"> 「{best}」")
-        g0 = u["groups"][0] if u["groups"] else None
-        if g0:
-            citations.append(
-                {
-                    "n": len(citations) + 1,
-                    "chunk_id": g0["chunk_ids"][0],
-                    "citation": f"{doc_title} · {u['code']} {u['title']} · 第 {g0['page']} 页",
-                    "chapter_path": [u["volume"], f"{u['code']} {u['title']}"],
-                    "unit": u["code"],
-                    "unit_title": u["title"],
-                    "volume": u["volume"],
-                    "start": g0["start"],
-                    "end": g0["end"],
-                    "page": g0["page"],
-                    "chunk_type": "body",
-                    "philosophers": a["philosophers"],
-                    "concepts": a["concepts"],
-                    "eras": [],
-                    "text": g0["text"][:600],
-                    "score": u["density"],
-                }
-            )
         lines.append("")
 
+    citations = _theme_citations(res, doc_title)
     # ---- 三、衍生与谱系 ----
     if res["lineage"] or ext:
         lines.append("### 三、衍生与谱系")
@@ -1007,8 +1023,13 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
         if res["eras"]:
             lines.append("- 年代分布：" + "、".join(f"{e}（{c}）" for e, c in res["eras"]))
         for u in ext:
-            if u["groups"]:
-                snippet = _theme_sentences(u["groups"][0]["text"], terms, per_unit // 2)
+            groups = u.get("selected_groups") or u["groups"]
+            if groups:
+                snippet = _theme_sentences(
+                    "\n".join(g["text"] for g in groups),
+                    terms,
+                    per_unit // 2,
+                )
                 lines.append(f"- **{u['code']} {u['title']}**（{u['hits']} 块）：{snippet}")
         lines.append("")
 
@@ -1075,26 +1096,7 @@ def theme_answer(
         )
         text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="theme")
         text = _clean_generated_answer(text)
-        citations = [
-            {
-                "n": i,
-                "chunk_id": u["groups"][0]["chunk_ids"][0] if u["groups"] else "",
-                "citation": f"{doc_title} · {u['code']} {u['title']}",
-                "unit": u["code"],
-                "unit_title": u["title"],
-                "volume": u["volume"],
-                "page": u["groups"][0]["page"] if u["groups"] else 0,
-                "start": u["groups"][0]["start"] if u["groups"] else 0,
-                "end": u["groups"][0]["end"] if u["groups"] else 0,
-                "chunk_type": "body",
-                "philosophers": res["anchors"]["philosophers"],
-                "concepts": res["anchors"]["concepts"],
-                "eras": [],
-                "text": u["groups"][0]["text"][:600] if u["groups"] else "",
-                "score": u["density"],
-            }
-            for i, u in enumerate(res["units"], start=1)
-        ]
+        citations = _theme_citations(res, doc_title)
 
     return {
         "question": topic,
@@ -1162,26 +1164,7 @@ def _theme_answer_stream(
         yield {"type": "done", "answer": text}
         return
 
-    citations = [
-        {
-            "n": i,
-            "chunk_id": u["groups"][0]["chunk_ids"][0] if u["groups"] else "",
-            "citation": f"{doc_title} · {u['code']} {u['title']}",
-            "unit": u["code"],
-            "unit_title": u["title"],
-            "volume": u["volume"],
-            "page": u["groups"][0]["page"] if u["groups"] else 0,
-            "start": u["groups"][0]["start"] if u["groups"] else 0,
-            "end": u["groups"][0]["end"] if u["groups"] else 0,
-            "chunk_type": "body",
-            "philosophers": res["anchors"]["philosophers"],
-            "concepts": res["anchors"]["concepts"],
-            "eras": [],
-            "text": u["groups"][0]["text"][:600] if u["groups"] else "",
-            "score": u["density"],
-        }
-        for i, u in enumerate(res["units"], start=1)
-    ]
+    citations = _theme_citations(res, doc_title)
 
     theme_meta = {
         "seed_mode": res["seed_mode"],
