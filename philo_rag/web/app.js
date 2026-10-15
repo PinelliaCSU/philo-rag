@@ -3,11 +3,13 @@
 /* ==========================================================================
    哲学大纲 · 知识库 —— 界面逻辑（原生 JS，无构建步骤）
 
-   三个视图：
-     溯源回答 —— 提问方式可切换（自动判定 / 点查询 / 范围查询），回答与引用分栏，
-                 引用来源在固定区域内逐条翻页浏览；
-     检索     —— 术语 / 概念 与 引文 / 原话 两种方式分段切换，结果统一分页；
-     分面·体系 —— 卷、单元、理论家、概念的结构导航，卡片可直接转成提问。
+   一个主入口（溯源回答）+ 三个可召唤面板：
+     主视图    —— 提问方式可切换（自动判定 / 点查询 / 范围查询），回答与引用分栏，
+                  引用来源在固定区域内逐条翻页浏览；
+     概念卡    —— 点「术语注解」里的术语或侧栏按钮打开，显示词典卡（定义/出处/
+                  单元分布/哲学家谱系/引文），数据来自 /api/concept；
+     检索      —— 术语 / 概念 与 引文 / 原话 两种方式分段切换，结果统一分页；
+     体系地图  —— 四个字头 × 四个位面（场域/本体/认识/目的）坐标视图，单元可转提问。
    ========================================================================== */
 
 /* ------------------------------ 基础工具 ------------------------------ */
@@ -52,7 +54,9 @@ function startTimer(el) {
    范围查询的回答是带结构的：四节标题、小节标题、**强调**。后端按 Markdown 输出，
    这里做最小可用渲染——刻意不引入 Markdown 库：本项目要求无构建步骤、离线可用，
    而回答只会用到标题 / 强调 / 列表 / 分隔线 / 行内代码这几种语法。
-   所有文本先过 esc()，因此渲染结果是安全的；`[3][5]` 这类引用不会被改动。
+   所有文本先过 esc()，因此渲染结果是安全的。渲染完成后，正文里的
+   [n]/[E0x] 引用标记由 markupCiteRefs() 转成可点击按钮；Markdown 链接
+   形如 [文字](url) 不会匹配该模式，已生成的 HTML 标签也不会被误伤。
    ------------------------------------------------------------------------- */
 const RE_MD_HEADING = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
 const RE_MD_HR = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
@@ -63,6 +67,17 @@ const RE_MD_CIRCLED = /^\s*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰�
 
 function mdInline(s) {
   return esc(s)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+
+/* 「术语注解」的列表项：`- **术语**：不超过25字解释` 里的术语转成
+   概念卡按钮（data-term 由全局点击监听捕获）。只作用于 `**…**：` 形态，
+   普通加粗与引用标记 [n]/[E0x] 不受影响。 */
+function mdTermList(s) {
+  return esc(s)
+    .replace(/\*\*([^*\n]+)\*\*(?=\s*[：:])/g,
+      '<button type="button" class="term-link" data-term="$1">$1</button>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`\n]+)`/g, '<code>$1</code>');
 }
@@ -104,7 +119,7 @@ function mdToHtml(text) {
       flushPara();
       const kind = ul ? 'ul' : 'ol';
       if (list !== kind) { flushList(); out.push(`<${kind}>`); list = kind; }
-      out.push(`<li>${mdInline((ul || ol)[1])}</li>`);
+      out.push(`<li>${mdTermList((ul || ol)[1])}</li>`);
       continue;
     }
     flushList();
@@ -112,7 +127,19 @@ function mdToHtml(text) {
   }
   flushPara();
   flushList();
-  return out.join('');
+  return markupCiteRefs(out.join(''));
+}
+
+/* 把回答正文里的 [n] / [E0x] 引用标记转成可点击按钮：
+   [E0x] → data-ref="x"；[n] → data-ref="n"。用交替匹配先吞掉
+   <code> 整段与所有 HTML 标签，只替换真实文本里的标记，
+   因此 Markdown 链接（形如 [文字](url)）和标签属性都不会被误伤。 */
+function markupCiteRefs(html) {
+  return html.replace(/(<code>[^<]*<\/code>|<[^>]*>)|\[(E\d+|\d+)\](?!\()/g, (m, tag, mark) => {
+    if (tag) return tag;
+    const n = mark[0] === 'E' ? String(parseInt(mark.slice(1), 10)) : mark;
+    return `<button type="button" class="cite-ref" data-ref="${n}">[${mark}]</button>`;
+  });
 }
 
 /* 流式追加时按帧合并渲染：delta 每秒可上百个，逐个重排会明显卡顿。
@@ -198,14 +225,41 @@ function setStrategy(s) {
     cfg.egs.map(e => `<button type="button" class="eg" data-q="${esc(e)}">${esc(e)}</button>`).join('');
 }
 
-/* ------------------------------ 视图切换 ------------------------------ */
-function switchView(v) {
-  document.querySelectorAll('.tab').forEach(t => {
-    const selected = t.dataset.v === v;
+/* ------------------------------ 视图与面板 ------------------------------
+   主视图只有一个（溯源回答，永远可见）。检索 / 体系地图 / 概念卡改成
+   从右侧面板召唤，用 openPanel() 切换面板内容，closePanel() 回到主视图。 */
+const PANEL_TITLES = { concept: '概念卡', search: '术语 / 引文检索', map: '体系地图' };
+
+function closePanel() {
+  $('#panel').classList.remove('open');
+  document.querySelectorAll('#panel-nav .tab').forEach(t => {
+    t.classList.remove('on');
+    t.setAttribute('aria-pressed', 'false');
+  });
+}
+
+function openPanel(kind) {
+  $('#panel').classList.add('open');
+  $('#panel-title').textContent = PANEL_TITLES[kind] || '';
+  document.querySelectorAll('.panel-pane').forEach(p =>
+    p.classList.toggle('on', p.id === 'pane-' + kind));
+  document.querySelectorAll('#panel-nav .tab').forEach(t => {
+    const selected = t.dataset.p === kind;
     t.classList.toggle('on', selected);
     t.setAttribute('aria-pressed', String(selected));
   });
-  document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
+  if (kind === 'map' && state.units.length) renderSystemMap();
+  if (kind === 'concept') {
+    const q = $('#concept-q');
+    if (q && !q.value) q.focus();
+  }
+}
+
+/* 旧的三视图切换调用点（askQuestion / data-toquote）保持兼容 */
+function switchView(v) {
+  if (v === 'search') openPanel('search');
+  else if (v === 'facet') openPanel('map');
+  else closePanel();
 }
 
 /* ------------------------------ 溯源回答 ------------------------------ */
@@ -237,8 +291,22 @@ function renderAnswer(r) {
       <div class="overview-units">${units}</div>
       <div class="overview-lineage">${lin}</div></div>`;
   }
+
+  /* 术语注解：done.answer 只含 sections，注解在 annotations 里单独携带。
+     转成 Markdown 走 mdToHtml()，让 `**术语**` 经 mdTermList 变成概念卡按钮；
+     文本在构造 Markdown 前先清洗换行（esc 交给 mdToHtml 内部做）。 */
+  const anns = (r.annotations || [])
+    .map(a => ({
+      term: String(a.term ?? '').replace(/[\r\n]+/g, ' ').trim(),
+      explanation: String(a.explanation ?? '').replace(/[\r\n]+/g, ' ').trim(),
+    }))
+    .filter(a => a.term && a.explanation);
+  const annBlock = anns.length
+    ? `<div class="ans">${mdToHtml('## 术语注解\n\n' + anns.map(a => `- **${a.term}**：${a.explanation}`).join('\n'))}</div>`
+    : '';
+
   h += `<div class="card"><h3>回答 <span class="muted heading-note">· ${strategyTag(r)}</span></h3>
-    <div class="ans">${mdToHtml(r.answer)}</div></div>`;
+    <div class="ans">${mdToHtml(r.answer)}</div>${annBlock}</div>`;
   out.innerHTML = h;
   out.scrollTop = scrollTop;
 }
@@ -247,11 +315,19 @@ function citeCard(c) {
   const ph = (c.philosophers || []).map(x => `<span class="tag">${esc(x)}</span>`).join('');
   const cc = (c.concepts || []).map(x => `<span class="tag">${esc(x)}</span>`).join('');
   const head = c.unit ? `<span class="unit">${esc(c.unit)}</span> ${esc(c.unit_title || '')}` : '';
-  return `<div class="cite">
-    <div class="meta"><b>[${c.n ?? ''}]</b> ${esc(c.citation)}</div>
+  const n = c.n ?? '';
+  const text = c.text || '';
+  /* evidence 来源的 text 被后端截到 1200 字，达到该长度视为可能截断 */
+  const truncated = text.length >= 1200;
+  return `<div class="cite" id="cite-${esc(n)}">
+    <div class="meta"><b>[${n}]</b> ${esc(c.citation)}</div>
     <div class="cite-tags">${head} ${ph}${cc}</div>
-    <div class="body">${esc(c.text)}</div>
-    <div class="foot"><button class="ghost" data-ctx="${esc(c.chunk_id)}">查看上下文</button></div>
+    <div class="body cite-body" data-truncated="${truncated ? 1 : 0}" data-loaded="0">${esc(text)}</div>
+    <div class="foot">
+      <button class="ghost cite-toggle" data-toggle="${esc(n)}">${truncated ? '展开全文' : '收起'}</button>
+      <button class="ghost" data-ctx="${esc(c.chunk_id)}">查看上下文</button>
+      <span class="muted cite-expand-err" hidden></span>
+    </div>
   </div>`;
 }
 
@@ -270,6 +346,83 @@ function renderCitations(r) {
   pane.scrollTop = 0;
   pager.innerHTML = pagerHTML(list.length, p, CITE_PER_PAGE);
   wirePager(pager, list.length, p, CITE_PER_PAGE, n => { state.citePage = n; renderCitations(r); });
+}
+
+/* 点回答正文里的引用标记：收起面板 → 切到对应页 → 滚动到卡片 → flash 高亮 */
+function jumpToCite(ref) {
+  closePanel();
+  const r = state.ask;
+  const list = (r && r.citations) || [];
+  const idx = list.findIndex(c => String(c.n) === String(ref));
+  if (idx === -1) return;
+
+  const page = Math.floor(idx / CITE_PER_PAGE);
+  if (state.citePage !== page) {
+    state.citePage = page;
+    renderCitations(r);
+  }
+
+  const card = document.getElementById('cite-' + ref);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  card.classList.remove('cite-flash');
+  void card.offsetWidth;               // 强制重排，保证连续点击也能重新触发过渡
+  card.classList.add('cite-flash');
+  setTimeout(() => card.classList.remove('cite-flash'), 1500);
+}
+
+function refreshCiteToggle(citeEl) {
+  const btn = citeEl.querySelector('.cite-toggle');
+  const body = citeEl.querySelector('.cite-body');
+  if (!btn || !body) return;
+  const collapsed = citeEl.classList.contains('cite-collapsed');
+  const truncated = body.dataset.truncated === '1';
+  const loaded = body.dataset.loaded === '1';
+  if (collapsed || (truncated && !loaded)) btn.textContent = '展开全文';
+  else btn.textContent = '收起';
+}
+
+/* 引用卡片的展开/收起：截断文本点「展开全文」时用 chunk_id 取回完整原文 */
+async function toggleCite(btn) {
+  const citeEl = btn.closest('.cite');
+  if (!citeEl) return;
+  const body = citeEl.querySelector('.cite-body');
+  const collapsed = citeEl.classList.contains('cite-collapsed');
+  const truncated = body.dataset.truncated === '1';
+  const loaded = body.dataset.loaded === '1';
+
+  if (!collapsed && truncated && !loaded) {
+    const n = btn.dataset.toggle;
+    const list = (state.ask && state.ask.citations) || [];
+    const c = list.find(x => String(x.n) === String(n));
+    if (!c || !c.chunk_id) {
+      citeEl.classList.add('cite-collapsed');
+      refreshCiteToggle(citeEl);
+      return;
+    }
+    const errEl = citeEl.querySelector('.cite-expand-err');
+    if (errEl) errEl.hidden = true;
+    btn.disabled = true;
+    btn.textContent = '加载中…';
+    try {
+      const r = await jget('/api/context?chunk_id=' + encodeURIComponent(c.chunk_id) + '&window=2');
+      const focus = (r.items || []).find(it => it.is_focus) || (r.items || [])[0];
+      if (!focus || !focus.text) throw new Error('上下文里没有命中块');
+      body.textContent = focus.text;
+      body.dataset.loaded = '1';
+      body.dataset.truncated = '0';
+      citeEl.classList.remove('cite-collapsed');
+    } catch (e) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = '展开全文失败：' + e.message; }
+    } finally {
+      btn.disabled = false;
+      refreshCiteToggle(citeEl);
+    }
+    return;
+  }
+
+  citeEl.classList.toggle('cite-collapsed', !collapsed);
+  refreshCiteToggle(citeEl);
 }
 
 async function doAsk(q, strategy) {
@@ -323,10 +476,17 @@ async function doAsk(q, strategy) {
           answerText += event.text;
           if (answerEl) paintAnswer(answerEl, answerText);
         } else if (event.type === 'done') {
-          // 最终清理（去掉模型可能输出的来源行）
+          // 最终清理（去掉模型可能输出的来源行）。sections/annotations 在
+          // meta 阶段被后端置空，done 事件里才是解析后的真值，必须一并合入，
+          // 否则最终渲染会覆盖掉流式期间已显示的「术语注解」。
           if (meta) {
             meta.answer = event.answer;
-            state.ask = { ...meta, answer: event.answer };
+            state.ask = {
+              ...meta,
+              answer: event.answer,
+              sections: event.sections || [],
+              annotations: event.annotations || [],
+            };
             renderAnswer(state.ask);
           }
         } else if (event.type === 'error') {
@@ -554,48 +714,174 @@ async function runQuote() {
   }
 }
 
-/* ------------------------------ 分面 · 体系 ------------------------------ */
-function renderFacets() {
-  if (!state.facets) return;
-  const f = state.facets, u = state.units;
-  const byVol = {};
-  u.forEach(x => { (byVol[x.volume] ||= []).push(x); });
-
-  let h = `<div class="card facet-hero"><div class="muted">知识结构导航</div><h2>体系 · 卷与单元</h2>
-    <div class="stat-grid">
-      <div class="stat-box"><b>${u.length}</b><span>数值单元</span></div>
-      <div class="stat-box"><b>${Object.keys(byVol).length}</b><span>卷</span></div>
-      <div class="stat-box"><b>${f.concept.length}</b><span>核心概念</span></div>
-    </div></div>`;
-
-  h += `<div class="card muted facet-guide">点击任一卡片会把它转成一个提问：<b>概念</b> → 点查询「什么是 X？」；
-        <b>理论家</b> → 范围查询「X 的核心思想是什么？」；<b>单元</b> → 自动判定。</div>`;
-
-  for (const v of Object.keys(byVol)) {
-    h += `<section class="card volume-section"><div class="row volume-head"><h3>${esc(v)}</h3>
-      <span class="muted">${byVol[v].length} 个单元</span></div>
-      <div class="grid volume-grid">` +
-      byVol[v].map(x =>
-        `<button class="chip unit-card" data-unit="${esc(x.code)}">
-           <span class="unit">${esc(x.code)}</span><span>${esc(x.title)}</span>
-         </button>`).join('') +
-      `</div></section>`;
+/* ------------------------------ 概念卡侧栏 ------------------------------
+   纯渲染函数 renderConceptCard(r)：不触碰 DOM，便于单测。
+   /api/concept 契约：{term, aliases[], found, definition{text, unit,
+   unit_title, page, char_span, citation, chunk_id?}, units[{code,title,hits}],
+   philosophers[{name,count}], quotes[{text,speaker,unit,citation}]}。
+   防御性处理：found=false、请求失败、404 一律显示「未收录或服务不可用」。 */
+function renderConceptCard(r) {
+  if (!r || !r.found) {
+    return '<div class="card muted">未收录或服务不可用。</div>';
+  }
+  const def = r.definition || {};
+  const aliases = (r.aliases || []).filter(a => a && a !== r.term);
+  const src = [];
+  if (def.unit) {
+    src.push(`<button type="button" class="ghost concept-src" data-map-unit="${esc(def.unit)}">
+      ${esc(def.unit)} ${esc(def.unit_title || '')}</button>`);
+  }
+  if (def.citation) src.push(`<span class="muted">${esc(def.citation)}</span>`);
+  if (def.page != null) src.push(`<span class="muted">p.${esc(def.page)}</span>`);
+  if (def.char_span) src.push(`<span class="muted">${esc(def.char_span)}</span>`);
+  if (def.chunk_id) {
+    src.push(`<button type="button" class="ghost" data-ctx="${esc(def.chunk_id)}">查看上下文</button>`);
   }
 
-  const names = { philosopher: '理论家', concept: '概念', era: '年代', school: '流派' };
-  for (const k of ['philosopher', 'concept', 'era', 'school']) {
-    const max = (f[k][0] && f[k][0][1]) || 1;
-    h += `<div class="card axis-card"><h3>${names[k]} <span class="muted">· ${f[k].length} 项</span></h3>
-      <div class="grid">` +
-      f[k].map(([name, n]) =>
-        `<button class="chip" data-k="${k}" data-name="${esc(name)}">
-           <span>${esc(name)}<div class="bar"><i style="width:${Math.max(8, Math.round(n / max * 100))}%"></i></div></span>
-           <b>${n}</b>
-         </button>`).join('') +
-      `</div></div>`;
-  }
+  const units = (r.units || []).map(u =>
+    `<button type="button" class="chip concept-unit" data-map-unit="${esc(u.code)}">
+       <span class="unit">${esc(u.code)}</span><span>${esc(u.title || '')}</span>
+       <b>${u.hits != null ? u.hits + ' 块' : ''}</b>
+     </button>`).join('');
 
-  $('#facet-out').innerHTML = h;
+  const phils = (r.philosophers || []).map(p =>
+    `<span class="tag">${esc(p.name)} <span class="muted">${p.count}</span></span>`).join('');
+
+  const quotes = (r.quotes || []).map(q =>
+    `<div class="quote">「${esc(q.text)}」
+       <div class="meta muted quote-meta">—— ${esc(q.speaker || '未署名')}　
+         <span class="unit">${esc(q.unit || '—')}</span><br>${esc(q.citation || '')}</div>
+     </div>`).join('');
+
+  return `<div class="concept-card">
+    <div class="card concept-hero">
+      <div class="muted">术语词典</div>
+      <h2>${esc(r.term)}</h2>
+      ${aliases.length ? `<div class="muted">别名：${esc(aliases.join('、'))}</div>` : ''}
+    </div>
+    <div class="card">
+      <h3>定义</h3>
+      <p class="concept-definition">${esc(def.text || '—')}</p>
+      ${src.length ? `<div class="concept-source">出处：${src.join('　')}</div>` : ''}
+    </div>
+    ${units ? `<div class="card"><h3>单元分布</h3><div class="grid concept-grid">${units}</div></div>` : ''}
+    ${phils ? `<div class="card"><h3>哲学家谱系</h3><div class="concept-lineage">${phils}</div></div>` : ''}
+    ${quotes ? `<div class="card"><h3>引文</h3>${quotes}</div>` : ''}
+  </div>`;
+}
+
+async function loadConcept(term) {
+  const t = (term || '').trim();
+  if (!t) return;
+  const out = $('#concept-out');
+  $('#concept-q').value = t;
+  out.innerHTML = '<div class="muted">加载中…</div>';
+  try {
+    const r = await jget('/api/concept?term=' + encodeURIComponent(t) + '&limit=8');
+    out.innerHTML = renderConceptCard(r);
+  } catch (e) {
+    out.innerHTML = '<div class="card muted">未收录或服务不可用。</div>';
+  }
+}
+
+function openConcept(term) {
+  openPanel('concept');
+  if (term) loadConcept(term);
+}
+
+/* ------------------------------ 体系地图 ------------------------------
+   四个字头（编号首位）× 四个位面（depth）的坐标视图。数据只用
+   /api/facets（unit 计数等）与 /api/units（code/title/depth/volume）。
+   点击单元 → 显示该单元标题与信息 → 一键用该单元发起提问。 */
+const HEAD_NAMES = { '1': '形而下学', '2': '形而上学', '3': '观念论', '4': '实践' };
+const LAYER_NAMES = ['场域论', '本体论', '认识论', '目的论'];
+
+function headIndex(code) {
+  const h = String(code || '').split('-')[0];
+  return HEAD_NAMES[h] ? Number(h) : 0;
+}
+
+function layerIndex(u) {
+  const d = Number(u.depth);
+  if (d >= 1 && d <= 4) return d;
+  const segs = String(u.code || '').split('-').length;
+  return Math.max(1, Math.min(4, segs));
+}
+
+function mapUnitChip(u, hits) {
+  return `<button type="button" class="chip map-unit" data-map-code="${esc(u.code)}">
+    <span class="unit">${esc(u.code)}</span><span>${esc(u.title || '')}</span>
+    ${hits ? `<b>${hits}</b>` : ''}
+  </button>`;
+}
+
+function renderSystemMap() {
+  if (!state.units.length) return;
+  const f = state.facets || { concept: [], philosopher: [] };
+  const hitByCode = {};
+  (f.unit || []).forEach(([k, n]) => { hitByCode[k] = n; });
+
+  const cells = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
+  let unplaced = 0;
+  state.units.forEach(u => {
+    const x = headIndex(u.code) - 1;
+    const y = layerIndex(u) - 1;
+    if (x >= 0 && x < 4 && y >= 0 && y < 4) cells[x][y].push(u);
+    else unplaced++;
+  });
+
+  let h = `<div class="card map-hero">
+      <div class="muted">知识结构导航</div>
+      <h2>体系地图 · 字头 × 位面</h2>
+      <div class="stat-grid">
+        <div class="stat-box"><b>${state.units.length}</b><span>数值单元</span></div>
+        <div class="stat-box"><b>${new Set(state.units.map(u => u.volume)).size}</b><span>卷</span></div>
+        <div class="stat-box"><b>${f.concept.length}</b><span>核心概念</span></div>
+      </div></div>`;
+
+  h += `<div class="card muted map-guide">列 = 四个字头；行 = 四个位面。
+        点击任一单元，下方显示单元信息，可一键用该单元发起提问。</div>`;
+
+  h += '<div class="map-grid">';
+  h += '<div class="map-corner"></div>';
+  for (let x = 1; x <= 4; x++) {
+    h += `<div class="map-colhead"><b>${esc(HEAD_NAMES[String(x)])}</b>
+          <span class="muted">第 ${x} 字头</span></div>`;
+  }
+  for (let y = 0; y < 4; y++) {
+    h += `<div class="map-rowhead"><b>${esc(LAYER_NAMES[y])}</b>
+          <span class="muted">位面 ${y + 1}</span></div>`;
+    for (let x = 0; x < 4; x++) {
+      const list = cells[x][y];
+      h += `<div class="map-cell">
+        <div class="map-cell-head muted">${esc(HEAD_NAMES[String(x + 1)])} · ${esc(LAYER_NAMES[y])} · ${list.length} 单元</div>
+        ${list.map(u => mapUnitChip(u, hitByCode[u.code])).join('') || '<span class="muted">—</span>'}
+      </div>`;
+    }
+  }
+  h += '</div>';
+  if (unplaced) h += `<div class="muted map-note">${unplaced} 个单元未归入 4×4 字头/位面。</div>`;
+  h += '<div class="card map-detail" id="map-detail"></div>';
+  $('#map-out').innerHTML = h;
+}
+
+function selectMapUnit(code) {
+  const box = $('#map-detail');
+  if (!box) return;
+  if (!state.units.length) {
+    box.innerHTML = '<div class="muted">体系数据未加载，无法显示单元信息。</div>';
+    return;
+  }
+  const u = state.units.find(x => String(x.code) === String(code));
+  if (!u) {
+    box.innerHTML = `<div class="muted">未找到单元 ${esc(code)}。</div>`;
+    return;
+  }
+  const h = headIndex(u.code);
+  const l = layerIndex(u.code);
+  box.innerHTML = `<div class="row map-detail-head"><h3>${esc(u.code)} ${esc(u.title || '')}</h3></div>
+    <div class="muted">卷：${esc(u.volume || '—')}　字头：${esc(HEAD_NAMES[h] || '—')}　位面：${esc(LAYER_NAMES[l - 1] || '—')}</div>
+    <div class="term-actions"><button class="ghost" data-unit-ask="${esc(u.code)}">用该单元提问</button></div>`;
 }
 
 /* ------------------------------ 原文上下文 ------------------------------ */
@@ -615,7 +901,14 @@ async function openContext(chunkId) {
 }
 
 /* ------------------------------ 事件绑定 ------------------------------ */
-document.querySelectorAll('.tab').forEach(t => { t.onclick = () => switchView(t.dataset.v); });
+document.querySelectorAll('#panel-nav .tab').forEach(t => {
+  t.onclick = () => openPanel(t.dataset.p);
+});
+$('#panel-close').onclick = () => closePanel();
+$('#concept-go').onclick = () => loadConcept($('#concept-q').value);
+$('#concept-q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadConcept($('#concept-q').value);
+});
 
 document.querySelectorAll('#seg-strategy button').forEach(b => {
   b.onclick = () => setStrategy(b.dataset.s);
@@ -636,10 +929,24 @@ $('#ask-btn').onclick = () => {
 };
 $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ask-btn').click(); });
 
-/* 卡片上的两个动作：查看上下文 / 转到引文检索 */
+/* 全局动作：引用跳转 / 术语→概念卡 / 展开收起 / 查看上下文 / 出处→体系地图 / 转到引文检索 */
 document.addEventListener('click', e => {
+  const ref = e.target.closest('.cite-ref');
+  if (ref) { jumpToCite(ref.dataset.ref); return; }
+  const term = e.target.closest('.term-link');
+  if (term) { openConcept(term.dataset.term); return; }
+  const tgl = e.target.closest('.cite-toggle');
+  if (tgl) { toggleCite(tgl); return; }
   const ctx = e.target.closest('[data-ctx]');
   if (ctx) { openContext(ctx.dataset.ctx); return; }
+  const mu = e.target.closest('[data-map-unit]');
+  if (mu) {
+    openPanel('map');
+    selectMapUnit(mu.dataset.mapUnit);
+    const chip = document.querySelector(`.map-unit[data-map-code="${CSS.escape(mu.dataset.mapUnit)}"]`);
+    if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
   const tq = e.target.closest('[data-toquote]');
   if (tq) {
     state.searchMode = 'quote';
@@ -650,20 +957,18 @@ document.addEventListener('click', e => {
   }
 });
 
-/* 分面卡片 → 提问 */
-$('#facet-out').addEventListener('click', e => {
-  const chip = e.target.closest('.chip');
-  if (!chip) return;
-  const unit = chip.dataset.unit;
-  const k = chip.dataset.k;
-  const name = chip.dataset.name;
-  if (unit) {
-    const title = chip.querySelectorAll('span')[1];
-    askQuestion(`${unit}${title ? ' ' + title.textContent.trim() : ''} 的核心内容是什么？`, 'auto');
-  } else if (k === 'philosopher') {
-    askQuestion(`${name} 的核心思想是什么？`, 'theme');
-  } else if (k === 'concept') {
-    askQuestion(`什么是${name}？`, 'point');
+/* 体系地图：点单元 → 单元信息；点「用该单元提问」→ 收起面板并提问 */
+$('#map-out').addEventListener('click', e => {
+  const chip = e.target.closest('.map-unit');
+  if (chip) {
+    selectMapUnit(chip.dataset.mapCode);
+    return;
+  }
+  const ask = e.target.closest('[data-unit-ask]');
+  if (ask) {
+    const u = state.units.find(x => String(x.code) === String(ask.dataset.unitAsk));
+    const title = u && u.title ? ' ' + u.title : '';
+    askQuestion(`${ask.dataset.unitAsk}${title} 的核心内容是什么？`, 'auto');
   }
 });
 
@@ -673,7 +978,7 @@ $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') $('#mo
 
 /* 键盘：Esc 关弹窗；左右方向键翻引用 */
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { $('#modal').classList.add('hidden'); return; }
+  if (e.key === 'Escape') { $('#modal').classList.add('hidden'); closePanel(); return; }
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
   if (e.target.matches('input, select, textarea')) return;
   if (!$('#v-ask').classList.contains('on')) return;
@@ -692,8 +997,8 @@ document.addEventListener('keydown', e => {
     state.facets = f;
     state.units = u;
     fillQuoteSelects();
-    renderFacets();
+    renderSystemMap();
   } catch (e) {
-    $('#facet-out').innerHTML = `<div class="err">分面数据加载失败：${esc(e.message)}</div>`;
+    $('#map-out').innerHTML = `<div class="err">体系数据加载失败：${esc(e.message)}</div>`;
   }
 })();

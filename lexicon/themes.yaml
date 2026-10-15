@@ -1,0 +1,85 @@
+# 主题词典 · 流派/思潮级元数据锚定
+# 用途：为「精神分析」这类既不是理论家、也不是概念的流派级主题词提供元数据召回锚点。
+# 收录原则（units-first、概念精选）：
+#   - units 只保留该主题在全书中的真正核心单元（≤ 6）
+#   - philosophers 只留核心代表（≤ 4）
+#   - concepts 只留定义性概念（≤ 4），不挂大而全的通用词集合
+# 字段说明：
+#   name         中文标准名
+#   aliases      别名 / 外文名（查询命中用）
+#   philosophers 取自 philosophers.yaml 的标准名
+#   concepts     取自 concepts.yaml 的标准名（元数据命中的关键）
+#   units        取自 哲学大纲_体系.yaml 的单元编码
+#   era          可选，思想史阶段
+themes:
+  # ---------- 精神分析（3-4 卷主轴）----------
+  - name: 精神分析
+    aliases: [psychoanalysis, 精神分析学, 精神分析学派]
+    philosophers: [弗洛伊德, 拉康]
+    concepts: [客体小a, 症状]
+    units: [3-4-4-2, 3-4-4-4]
+    era: 20世纪
+
+  # ---------- 德国观念论（3-2 卷主轴）----------
+  - name: 德国观念论
+    aliases: [German Idealism, 德国唯心论, 德意志观念论]
+    philosophers: [康德, 黑格尔]
+    concepts: [扬弃, 物自体]
+    units: [3-2-1, 3-2-3, 3-2-4]
+    era: 18-19世纪
+
+  # ---------- 结构主义 ----------
+  - name: 结构主义
+    aliases: [structuralism, 结构主义思潮]
+    philosophers: [索绪尔, 列维-斯特劳斯, 阿尔都塞]
+    concepts: [结构主义, 能指, 主体化]
+    units: [3-4-1]
+    era: 20世纪
+
+  # ---------- 后结构主义 ----------
+  - name: 后结构主义
+    aliases: [post-structuralism, 解构主义, 后结构思潮]
+    philosophers: [福柯, 德里达, 德勒兹]
+    concepts: [后结构主义, 解构, 延异]
+    units: [3-4-2]
+    era: 20世纪
+
+  # ---------- 存在主义 ----------
+  - name: 存在主义
+    aliases: [existentialism, 实存主义]
+    philosophers: [克尔凯郭尔, 萨特]
+    concepts: [存在主义]
+    units: [3-2-3-3, 3-3-2]
+    era: 19-20世纪
+
+  # ---------- 法兰克福学派 ----------
+  - name: 法兰克福学派
+    aliases: [Frankfurt School, 法兰克福]
+    philosophers: [阿多诺, 霍克海默, 马尔库塞]
+    concepts: [否定辩证法, 意识形态, 意识形态批判]
+    units: [3-2-4-2, 3-2-4-3]
+    era: 20世纪
+
+  # ---------- 现象学 ----------
+  - name: 现象学
+    aliases: [phenomenology]
+    philosophers: [胡塞尔, 海德格尔, 梅洛庞蒂]
+    concepts: [面向事情本身, 现象学还原, 此在]
+    units: [3-1-1, 3-1-2]
+    era: 20世纪
+
+  # ---------- 实用主义 ----------
+  - name: 实用主义
+    aliases: [pragmatism]
+    philosophers: [詹姆斯, 杜威, 皮尔士]
+    concepts: []
+    units: [2-4-4-1, 2-4-4-3, 2-4-4-4, 2-2-4-3]
+    era: 19-20世纪
+
+  # ---------- 分析哲学 ----------
+  - name: 分析哲学
+    aliases: [analytic philosophy, 分析传统]
+    philosophers: [维特根斯坦, 罗素, 弗雷格]
+    concepts: [物理主义, 行为主义, 功能主义]
+    units: [2-4-3, 2-2-4-4]
+    era: 20世纪

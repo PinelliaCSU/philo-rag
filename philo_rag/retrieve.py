@@ -572,3 +572,132 @@ def facet_summary(store: Store, lex: Lexicon) -> dict[str, list[tuple[str, int]]
         "unit": top(store.terms["unit"], 60),
         "speaker": top(speakers),
     }
+
+
+# --------------------------------------------------------------------------- #
+# 概念卡构建：/api/concept 数据源
+# --------------------------------------------------------------------------- #
+def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) -> dict[str, Any]:
+    """术语概念卡：定义句与出处 + 单元分布 + 共现理论家 + 相关引文。
+
+    只读 store 与 lex，不走向量检索。定义句来自正文块（含「X 是/即/意味着」
+    定义句式），单元/理论家统计来自块元数据与正文命中，引文来自 quote 块。
+    """
+    limit = max(0, min(int(limit), 20))
+    card = lex.concept_card(term)
+    if card is None:
+        return {
+            "term": term,
+            "aliases": [],
+            "found": False,
+            "definition": None,
+            "units": [],
+            "philosophers": [],
+            "quotes": [],
+        }
+
+    std = card["name"]
+    aliases = list(card.get("aliases") or [])
+    names = [std, *aliases]
+
+    def text_has(text: str, name: str) -> bool:
+        if name in text:
+            return True
+        if any(ch.isascii() and ch.isalpha() for ch in name):
+            return name.lower() in text.lower()
+        return False
+
+    def chunk_hits(c: Chunk) -> bool:
+        return std in c.concepts or any(text_has(c.text, n) for n in names)
+
+    # definition：正文中「X 是/即/意味着」的定义句式块。排序键优先正文块、
+    # 优先标准名句式、优先与词典定义重合度高的块、优先术语密度高的块。
+    defn_pat_std = re.compile(rf"{re.escape(std)}\s*(?:是|即|意味着)")
+    defn_pats = [defn_pat_std] + [
+        re.compile(rf"{re.escape(n)}\s*(?:是|即|意味着)") for n in aliases
+    ]
+    lex_tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", card.get("definition") or "")
+    type_rank = {"body": 0, "footnote": 1, "quote": 2}
+    defn: Chunk | None = None
+    defn_key: tuple | None = None
+    for c in store.chunks:
+        if not chunk_hits(c):
+            continue
+        if not any(p.search(c.text) for p in defn_pats):
+            continue
+        canon = 1 if defn_pat_std.search(c.text) else 0
+        density = sum(c.text.count(n) for n in names) / max(len(c.text), 1)
+        overlap = sum(1 for tok in lex_tokens if tok in c.text)
+        key = (type_rank.get(c.chunk_type, 3), -canon, -overlap, -density, c.seq)
+        if defn_key is None or key < defn_key:
+            defn_key = key
+            defn = c
+
+    doc_title = store.manifest.get("doc_title", "")
+
+    def cite(code: str, title: str, page: int) -> str:
+        parts: list[str] = []
+        if doc_title:
+            parts.append(f"《{doc_title}》")
+        if code:
+            parts.append(f"{code} {title}".strip() if title else code)
+        if page:
+            parts.append(f"第 {page} 页")
+        return " · ".join(parts)
+
+    definition = None
+    if defn is not None:
+        code = defn.unit_code()
+        title = lex.unit_title(code)
+        definition = {
+            "text": defn.text,
+            "unit": code,
+            "unit_title": title,
+            "page": int(defn.page or 0),
+            "char_span": f"{defn.start}-{defn.end}",
+            "citation": cite(code, title, int(defn.page or 0)),
+        }
+
+    unit_hits: dict[str, int] = {}
+    phil_hits: dict[str, int] = {}
+    for c in store.chunks:
+        if not chunk_hits(c):
+            continue
+        code = c.unit_code()
+        if code:
+            unit_hits[code] = unit_hits.get(code, 0) + 1
+        for p in c.philosophers:
+            phil_hits[p] = phil_hits.get(p, 0) + 1
+
+    units = [
+        {"code": code, "title": lex.unit_title(code), "hits": int(hits)}
+        for code, hits in sorted(unit_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    ]
+    philosophers = [
+        {"name": name, "count": int(count)}
+        for name, count in sorted(phil_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    ]
+
+    quote_chunks = [
+        c for c in store.quotes() if any(text_has(c.text, n) for n in names)
+    ]
+    quote_chunks.sort(key=lambda c: c.seq)
+    quotes = [
+        {
+            "text": c.text,
+            "speaker": c.speaker or "未署名",
+            "unit": c.unit_code(),
+            "citation": cite(c.unit_code(), lex.unit_title(c.unit_code()), int(c.page or 0)),
+        }
+        for c in quote_chunks[:limit]
+    ]
+
+    return {
+        "term": term,
+        "aliases": aliases,
+        "found": True,
+        "definition": definition,
+        "units": units,
+        "philosophers": philosophers,
+        "quotes": quotes,
+    }

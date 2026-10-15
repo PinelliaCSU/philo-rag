@@ -243,6 +243,14 @@ def create_app(cfg: dict) -> FastAPI:
             keyword=keyword, top_k=limit,
         )
 
+    @app.get("/api/concept")
+    def concept(term: str = Query(..., min_length=1), limit: int = 8) -> dict:
+        """术语概念卡：定义句与出处 + 单元分布 + 共现理论家 + 相关引文。"""
+        from .retrieve import build_concept_card
+
+        store, lex = _STATE["store"], _STATE["lex"]
+        return build_concept_card(store, lex, term, limit)
+
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
         """取某块及其前后各 window 块，用于界面上的「查看上下文」。"""

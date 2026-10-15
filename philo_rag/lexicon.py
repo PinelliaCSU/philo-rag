@@ -13,13 +13,14 @@ def _load_yaml(path: Path) -> Any:
 
 
 class Lexicon:
-    """哲学家词典 + 概念词典 + 体系目录的统一入口。
+    """哲学家词典 + 概念词典 + 主题词典 + 体系目录的统一入口。
 
     职责：
       1. 文本 → 标准哲学家名 / 标准概念名（别名归一）
       2. 查询扩展（术语 → 别名、外文名）
       3. 哲学家 → 年代 / 世纪 / 流派
       4. 数值单元编号 → 单元名 / 卷 / 字头（哲学大纲体系目录）
+      5. 主题词 → 流派/思潮锚点（哲学家 / 概念 / 单元三路展开）
     """
 
     def __init__(
@@ -27,24 +28,28 @@ class Lexicon:
         philosophers_path: Path,
         concepts_path: Path,
         taxonomy_path: Path | None = None,
+        themes_path: Path | None = None,
     ) -> None:
         self.philosophers: dict[str, dict[str, Any]] = {}
         self.concepts: dict[str, dict[str, Any]] = {}
+        self.themes: list[dict[str, Any]] = []
         self._phil_alias: list[tuple[str, str]] = []
         self._concept_alias: list[tuple[str, str]] = []
+        self._theme_alias: list[tuple[str, str]] = []
         # 体系目录
         self.title: str = ""
         self.volumes: list[str] = []
         self.axes: dict[str, list[dict[str, Any]]] = {}
         self.units: list[dict[str, Any]] = []
         self._unit_by_code: dict[str, dict[str, Any]] = {}
-        self._load(philosophers_path, concepts_path, taxonomy_path)
+        self._load(philosophers_path, concepts_path, taxonomy_path, themes_path)
 
     def _load(
         self,
         philosophers_path: Path,
         concepts_path: Path,
         taxonomy_path: Path | None,
+        themes_path: Path | None,
     ) -> None:
         raw = _load_yaml(philosophers_path) or {}
         for item in raw.get("philosophers", []):
@@ -75,6 +80,20 @@ class Lexicon:
             for u in self.units:
                 self._unit_by_code.setdefault(u["code"], u)
 
+        # 主题词典（流派/思潮级）；cli.get_lexicon 未透传时按词典同目录回退，
+        # 该目录与 config.yaml 中 lexicon.themes 的配置路径一致。
+        if themes_path is None:
+            themes_path = philosophers_path.parent / "themes.yaml"
+        if themes_path.exists():
+            raw = _load_yaml(themes_path) or {}
+            for item in raw.get("themes", []):
+                name = item["name"]
+                self.themes.append(item)
+                for alias in [name, *item.get("aliases", [])]:
+                    if alias:
+                        self._theme_alias.append((alias, name))
+            self._theme_alias.sort(key=lambda x: len(x[0]), reverse=True)
+
     # ---------- 匹配 ----------
 
     @staticmethod
@@ -104,6 +123,31 @@ class Lexicon:
 
     def match_concepts(self, text: str) -> list[str]:
         return self._scan(text, self._concept_alias, [])
+
+    def match_themes(self, topic: str) -> list[dict[str, Any]]:
+        """按主题名/别名匹配，返回命中的主题记录（保序、去重）。"""
+        names = self._scan(topic, self._theme_alias, [])
+        by_name = {t["name"]: t for t in self.themes}
+        return [by_name[n] for n in names if n in by_name]
+
+    def theme_anchors(self, topic: str) -> tuple[list[str], list[str], list[str]]:
+        """主题词 → (philosophers, concepts, units) 三锚点。
+
+        按首个命中主题展开其理论家/概念/单元；无命中返回 ([], [], [])。
+        仅保留在对应词典中真实存在的标准名与单元编码。
+        """
+        matches = self.match_themes(topic)
+        if not matches:
+            return [], [], []
+        theme = matches[0]
+        phils = [str(p) for p in theme.get("philosophers", []) if p in self.philosophers]
+        concs = [str(c) for c in theme.get("concepts", []) if c in self.concepts]
+        units = [str(u) for u in theme.get("units", []) if str(u) in self._unit_by_code]
+        return (
+            list(dict.fromkeys(phils)),
+            list(dict.fromkeys(concs)),
+            list(dict.fromkeys(units)),
+        )
 
     def iter_philosophers(self, text: str) -> list[tuple[int, int, str]]:
         """返回 [(起偏移, 止偏移, 标准名)]，按出现位置排序。

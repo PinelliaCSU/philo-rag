@@ -52,188 +52,33 @@ from .schema import Chunk
 _ANSWER_CACHE: collections.OrderedDict[tuple[str, str], dict[str, Any]] = collections.OrderedDict()
 _ANSWER_CACHE_MAX = 64
 
-PROMPT_TEMPLATE = """你是一位严谨的哲学文献助手，正在为读者讲解《哲学大纲》一书。
-读者没有读过这本书，只想弄清「这里到底在说什么」——你的任务是让他**读懂**，而不是让他记住一串术语。
-
-写作要求：
-1. 只使用下面「资料」中的内容作答，不要引入资料之外的知识；解释术语时可以照用「术语速查」里的定义；
-2. 每个论断后面用 [编号] 标注来源，例如 [1][3]；只输出融贯的回答正文，不要输出“出处：”或来源列表；
-3. 如果资料不足以回答，请直接说明「资料不足」，绝不编造；
-4. **先说人话**：第一段第一句用一句日常语言给出结论，这一句里不出现本书特有的术语；先让读者听懂结论，再层层展开；
-5. **术语首次出现必须解释**：书里的术语（字头、场域论、大他者等）可以用，但每个术语**第一次**出现时紧跟「（即……）」补一句不超过 25 字的白话解释，解释照「术语速查」给的定义，不要自创；同一术语只解释一次，后文直接用它；
-6. **不要把术语串成定语链**：不要写「A 所预设的、由 B 兜底的 C」这类一层套一层的长定语；一句话里出现多个术语时，拆成几句话，用日常语言把彼此关系讲出来；
-7. 不要照抄资料里的单元编号或排版标记（例如把「2 形而上学」写成「2形而上学」），引用来源一律用 [编号]；
-8. 用中文回答，条理清晰，分成 3—5 个自然段，依次说明：核心定义、形成机制或论证路径、不同理论位置的张力，最后给出一句总结；不超过 {max_chars} 字；
-9. 写完自查一遍：上文凡是用到「术语速查」里的术语，第一次出现处是否都带了「（即……）」解释？漏掉的补上。
-
-术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
-{glossary}
-
-资料：
-{context}
-
-问题：{question}
-
-回答："""
-
-RE_SENT = re.compile(r"[^。！？；\n]+[。！？；]?")
-
-
-def build_context(hits: list[dict[str, Any]], doc_title: str) -> str:
-    parts: list[str] = []
-    for n, h in enumerate(hits, start=1):
-        c: Chunk = h["chunk"]
-        parts.append(f"[{n}] {c.text}")
-    return "\n\n".join(parts)
-
-
-# 术语速查最多注入多少条。检索到的资料通常只含 15—25 个词典术语，取 18 条能覆盖
-# 其中绝大部分（漏掉的往往正是模型随后会用上的那几个）；再多就会挤占正文篇幅，
-# 也会让模型产生「这些词都得写进去」的错觉，反而更晦涩。
-GLOSSARY_MAX_TERMS = 18
-
-
-def _term_counts(text: str, lex: Lexicon) -> dict[str, int]:
-    """统计词典术语（含别名）在文本中的出现次数，用于判断「本次回答绕不开哪些术语」。"""
-    counts: dict[str, int] = {}
-    for name, info in lex.concepts.items():
-        n = sum(text.count(alias) for alias in (name, *(info.get("aliases") or [])) if alias)
-        if n:
-            counts[name] = n
-    return counts
-
-
-def build_glossary(question: str, context_texts: list[str], lex: Lexicon,
-                   max_terms: int = GLOSSARY_MAX_TERMS) -> str:
-    """挑出本次回答会用到的术语，连同**词典里已有的**一句话定义注入提示词。
-
-    《哲学大纲》正文通篇是本书自造或挪用的术语，模型照抄资料就晦涩难懂。而
-    `lexicon/concepts.yaml` 给每个术语都写好了白话定义——这里把它们喂给模型，
-    让「术语首次出现时解释一句」有据可依；否则模型要么不解释，要么自己编一个说法。
-
-    选取顺序：问题里出现的术语优先（那才是读者真正在问的），其余按在资料中出现的
-    次数排序——在资料里反复出现的，正是模型接下来会写进回答的那批术语。
-    """
-    if not lex or not lex.concepts:
-        return "（本次没有可用的术语定义；遇到术语请用资料中的说法简要说明。）"
-
-    q_counts = _term_counts(question, lex)
-    ctx_counts = _term_counts("\n".join(context_texts), lex)
-
-    ranked = sorted(
-        set(q_counts) | set(ctx_counts),
-        key=lambda name: (
-            0 if name in q_counts else 1,
-            -(3 * q_counts.get(name, 0) + ctx_counts.get(name, 0)),
-            name,
-        ),
-    )
-
-    lines: list[str] = []
-    for name in ranked:
-        if len(lines) >= max_terms:
-            break
-        definition = str(lex.concepts[name].get("definition", "") or "").strip()
-        if definition:
-            lines.append(f"- {name}：{definition}")
-    if not lines:
-        return "（本次没有可用的术语定义；遇到术语请用资料中的说法简要说明。）"
-    return "\n".join(lines)
-
-
-def _sentences(text: str) -> list[str]:
-    return [s.strip() for s in RE_SENT.findall(text) if len(s.strip()) >= 8]
-
-
-def _query_terms(question: str) -> set[str]:
-    """查询词：用与索引一致的分词器，避免把整句当成一个词。"""
-    from .index import tokenize
-
-    return {t for t in tokenize(question) if len(t) >= 2}
-
-
-def _sentence_score(sentence: str, q_terms: set[str], topic_terms: list[str]) -> int:
-    score = sum(2 for term in q_terms if term in sentence)
-    score += sum(10 for term in topic_terms if term in sentence)
-    score += sum(
-        8 for term in topic_terms
-        if re.search(
-            rf"{re.escape(term)}.{{0,40}}(?:即|是指|意味着|定义为|指的是|不是|包含|意味着)",
-            sentence,
-        )
-    )
-    score += sum(
-        1 for marker in ("因为", "因此", "但是", "然而", "即", "指", "意味着", "核心")
-        if marker in sentence
-    )
-    return score
-
-
-def _role(sentence: str, topic_terms: list[str]) -> str:
-    definition = any(
-        re.search(
-            rf"{re.escape(term)}.{{0,40}}(?:即|是指|意味着|定义为|指的是|不是|包含)",
-            sentence,
-        )
-        for term in topic_terms
-    )
-    if definition:
-        return "定义"
-    if any(marker in sentence for marker in ("场域论", "本体论", "认识论", "目的论", "体系", "字头")):
-        return "体系"
-    if any(marker in sentence for marker in ("因为", "由于", "通过", "联结", "联想", "反复", "预料", "产生", "形成")):
-        return "机制"
-    if any(marker in sentence for marker in ("但", "然而", "不能", "消解", "问题", "缺陷", "只是", "第一推动", "局域", "普遍")):
-        return "张力"
-    if any(term in sentence for term in topic_terms):
-        return "展开"
-    return "背景"
-
-
-def _topic_evidence(
-    question: str,
-    hits: list[dict[str, Any]],
-    lex: Lexicon | None,
-    limit: int,
-) -> list[dict[str, Any]]:
-    """从候选块提取少量完整证据，按原文顺序恢复论证链。"""
-    if not hits:
-        return []
-
-    q_terms = _query_terms(question)
-    topic_terms = _definition_terms(question, lex) if lex else []
-    if not topic_terms:
-        topic_terms = [
-            term for term in q_terms
-            if term not in {"什么", "为何", "为什么", "如何", "怎么", "意思", "分别"}
-        ]
-    candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for h in hits:
-        c: Chunk = h["chunk"]
-        sents = _sentences(c.text) or [c.text]
-        best_i = max(range(len(sents)), key=lambda i: _sentence_score(sents[i], q_terms, topic_terms))
-        selected = sents[best_i]
-        # 短句通常是论证的前半句，保留其后的一个句子，避免断章取义。
-        if len(selected) < 65 and best_i + 1 < len(sents):
-            selected += sents[best_i + 1]
-        selected = selected.strip()
-        if len(selected) > 260:
-            selected = selected[:260].rstrip("，、； ") + "……"
-        if selected and selected not in seen:
-            candidates.append({
-                **h,
-                "evidence": selected,
-                "role": _role(selected, topic_terms),
-                "evidence_score": _sentence_score(selected, q_terms, topic_terms),
-            })
-            seen.add(selected)
-
-    # 先保留检索分数高的证据，再按原文顺序组织，避免跨卷乱跳。
-    candidates.sort(key=lambda x: (-x["evidence_score"], -x["score"]))
-    selected = candidates[:limit]
-    selected.sort(key=lambda x: x["chunk"].seq)
-    return selected
+# 证据整备与提示词已拆分到 answer_evidence / answer_prompt（见对应模块）
+from .answer_evidence import (
+    _group_citation,
+    _sentences,
+    _topic_evidence,
+    build_annotations,
+    build_context,
+    build_glossary,
+    build_point_evidence,
+    build_point_sections,
+    parse_structured_answer,
+    render_point_quote_first,
+    render_structured_sections,
+)
+from .answer_prompt import (
+    PROMPT_TEMPLATE,
+    PROMPT_TEMPLATE_LEGACY,
+    PROMPT_TEMPLATE_QUOTE_FIRST,
+    PROMPT_TEMPLATE_QUOTE_FIRST_STREAM,
+    THEME_PROMPT,
+    THEME_PROMPT_LEGACY,
+    THEME_PROMPT_QUOTE_FIRST,
+    THEME_PROMPT_QUOTE_FIRST_STREAM,
+    point_prompt,
+    prompt_style,
+    theme_prompt,
+)
 
 
 def template_answer(
@@ -241,11 +86,29 @@ def template_answer(
     hits: list[dict[str, Any]],
     doc_title: str,
     lex: Lexicon | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
-    """离线主题回答：证据筛选 + 论证分组，不调用大模型。"""
+    store: Store | None = None,
+    cfg: dict[str, Any] | None = None,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """离线点查询：可信基线编辑稿（原文完整段 + 坐标出处），不调用大模型。
+
+    返回 (text, evidence, sections, annotations)。evidence 保留
+    unit / volume / char_span / citation 信息，供引用面板直接消费。
+    """
+    if store is not None and cfg is not None:
+        a_cfg = (cfg or {}).get("answer", {}) or {}
+        limit = min(int(a_cfg.get("max_context_chunks", 8)), len(hits))
+        evidence = build_point_evidence(question, hits, store, lex, cfg, limit=limit)
+        if not evidence:
+            return "资料不足：索引中未找到与问题相关的内容。", [], [], []
+        text = render_point_quote_first(question, evidence, doc_title, lex, cfg)
+        sections = build_point_sections(question, evidence, lex)
+        annotations = build_annotations(question, [e["text"] for e in evidence], lex)
+        return text, evidence, sections, annotations
+
+    # 无 store 的旧调用兼容：退回「每块取 1 句」的旧抽取式行为。
     evidence = _topic_evidence(question, hits, lex, limit=min(8, len(hits)))
     if not evidence:
-        return "资料不足：索引中未找到与问题相关的内容。", []
+        return "资料不足：索引中未找到与问题相关的内容。", [], [], []
 
     order = ("定义", "机制", "展开", "张力", "体系", "背景")
     labels = {
@@ -275,7 +138,7 @@ def template_answer(
         for item in items:
             sentences.append(f"{item['evidence']} [{item['citation_number']}]")
         parts.append(f"{labels[role]}：{' '.join(sentences)}")
-    return "\n\n".join(parts), ordered_evidence
+    return "\n\n".join(parts), ordered_evidence, [], []
 
 
 def _clean_generated_answer(text: str) -> str:
@@ -286,6 +149,241 @@ def _clean_generated_answer(text: str) -> str:
             continue
         lines.append(line.rstrip())
     return "\n".join(lines).strip()
+
+
+def _bridge_max(cfg: dict[str, Any]) -> int:
+    return int(((cfg or {}).get("answer", {}) or {}).get("bridge_max_chars", 60))
+
+
+def _hit_citations(hits: list[dict[str, Any]], doc_title: str, lex: Lexicon) -> list[dict[str, Any]]:
+    """把 hybrid_search 的命中块转成前端引用（含 char_span）。"""
+    citations = []
+    for n, h in enumerate(hits, start=1):
+        c: Chunk = h["chunk"]
+        citations.append({
+            "n": n,
+            "chunk_id": c.chunk_id,
+            "citation": c.citation(doc_title),
+            "chapter_path": c.chapter_path,
+            "unit": c.unit_code(),
+            "unit_title": lex.unit_title(c.unit_code()),
+            "volume": c.volume(),
+            "char_span": f"{c.start}-{c.end}",
+            "start": c.start,
+            "end": c.end,
+            "page": c.page,
+            "chunk_type": c.chunk_type,
+            "philosophers": c.philosophers,
+            "concepts": c.concepts,
+            "eras": c.eras,
+            "text": c.text,
+            "score": round(h["score"], 6),
+        })
+    return citations
+
+
+def _evidence_citations(evidence: list[dict[str, Any]], doc_title: str, lex: Lexicon) -> list[dict[str, Any]]:
+    """把模板后端的段落群证据转成前端引用（证据结构已含 unit/vol/char_span/citation）。"""
+    citations = []
+    for n, e in enumerate(evidence, start=1):
+        citations.append({
+            "n": n,
+            "chunk_id": e.get("chunk_id", ""),
+            "citation": e.get("citation", ""),
+            "chapter_path": [],
+            "unit": e.get("unit", ""),
+            "unit_title": e.get("unit_title", ""),
+            "volume": e.get("volume", ""),
+            "char_span": e.get("char_span", ""),
+            "start": e.get("start", 0),
+            "end": e.get("end", 0),
+            "page": e.get("page", 0),
+            "chunk_type": "body",
+            "philosophers": [],
+            "concepts": [],
+            "eras": [],
+            "text": e.get("text", "")[:1200],
+            "score": round(float(e.get("score", 0.0)), 6),
+        })
+    return citations
+
+
+_RE_ANNOTATION = re.compile(r"^-\s*\**(.+?)\**\s*[:：]\s*(.+?)\s*$")
+_RE_TRAILING_REFS = re.compile(r"\s*(\[(?:E)?\d+\](?:\s*\[(?:E)?\d+\])*)\s*$")
+
+
+def _split_trailing_refs(line: str) -> tuple[str, list[str]]:
+    """把行尾的 [1][3] / [E01] 引用编号拆成 (正文, refs)。"""
+    m = _RE_TRAILING_REFS.search(line)
+    if not m:
+        return line.strip(), []
+    refs = re.findall(r"\[(E?\d+)\]", m.group(1))
+    return line[: m.start()].strip(), refs
+
+
+def _flush_markdown_paragraph(
+    cur: dict[str, Any] | None,
+    buffer: list[str],
+    *,
+    as_final: bool,
+) -> None:
+    """把累积的无引用编号行冲刷为 bridge 或 paragraph。"""
+    if cur is None or not buffer:
+        buffer.clear()
+        return
+    text = "".join(buffer).strip()
+    buffer.clear()
+    if not text:
+        return
+    if (
+        not as_final
+        and not cur["paragraphs"]
+        and not cur["bridge"]
+        and len(text) <= 120
+    ):
+        # 节标题后、首个带引用编号段落之前出现的短句 → 衔接语
+        cur["bridge"] = text
+    else:
+        cur["paragraphs"].append({"text": text, "refs": []})
+
+
+def parse_structured_markdown(raw: str) -> dict[str, Any] | None:
+    """从流式 quote_first 的 Markdown 输出提取 sections 与 annotations（best-effort）。
+
+    预期格式（由 *_QUOTE_FIRST_STREAM 提示词固定）：
+        ### 节标题
+        （可选一句衔接语）
+        原文段落 [1][3]
+        ## 术语注解
+        - **术语**：不超过25字白话解释
+
+    解析失败（没有任何 ### 节）返回 None。先剥掉可能的 ``` 代码块围栏。
+    """
+    if not raw:
+        return None
+    text = raw.strip()
+    fence = re.search(r"```(?:markdown|md)?\s*(.*?)```", text, re.S)
+    if fence:
+        text = fence.group(1).strip()
+
+    sections: list[dict[str, Any]] = []
+    annotations: list[dict[str, str]] = []
+    cur: dict[str, Any] | None = None
+    buffer: list[str] = []
+    in_annotations = False
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("## "):
+            _flush_markdown_paragraph(cur, buffer, as_final=True)
+            in_annotations = "术语注解" in s
+            cur = None
+            continue
+        if in_annotations:
+            m = _RE_ANNOTATION.match(s)
+            if m:
+                term = m.group(1).strip().strip("*").strip()
+                explanation = m.group(2).strip()
+                if term:
+                    annotations.append({"term": term, "explanation": explanation})
+            continue
+        if s.startswith("### "):
+            _flush_markdown_paragraph(cur, buffer, as_final=True)
+            cur = {"heading": s[4:].strip(), "bridge": "", "paragraphs": []}
+            sections.append(cur)
+            continue
+        if cur is None:
+            continue
+        body, refs = _split_trailing_refs(s)
+        if refs:
+            _flush_markdown_paragraph(cur, buffer, as_final=False)
+            if body:
+                cur["paragraphs"].append({"text": body, "refs": refs})
+        else:
+            buffer.append(s)
+
+    _flush_markdown_paragraph(cur, buffer, as_final=True)
+
+    if not sections:
+        return None
+    return {"sections": sections, "annotations": annotations}
+
+
+def _point_generate(
+    question: str,
+    hits: list[dict[str, Any]],
+    doc_title: str,
+    lex: Lexicon,
+    cfg: dict[str, Any],
+    backend: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """点查询的 LLM 生成：quote_first 走结构化 JSON，legacy 走自由文本。"""
+    style = prompt_style(cfg)
+    glossary = build_glossary(question, [h["chunk"].text for h in hits], lex)
+    context = build_context(hits, doc_title)
+    if style == "quote_first":
+        prompt = PROMPT_TEMPLATE_QUOTE_FIRST.format(
+            glossary=glossary,
+            context=context,
+            question=question,
+            bridge_max_chars=_bridge_max(cfg),
+        )
+    else:
+        prompt = PROMPT_TEMPLATE_LEGACY.format(
+            glossary=glossary,
+            context=context,
+            question=question,
+            max_chars=int(((cfg or {}).get("answer", {}) or {}).get("max_answer_chars", 400)),
+        )
+    raw = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="point")
+    if style != "quote_first":
+        return _clean_generated_answer(raw), [], []
+    data = parse_structured_answer(raw)
+    if data:
+        text = render_structured_sections(data, _clean_generated_answer(raw))
+        return text, (data.get("sections") or []), (data.get("annotations") or [])
+    return _clean_generated_answer(raw), [], []
+
+
+def _theme_generate(
+    topic: str,
+    res: dict[str, Any],
+    doc_title: str,
+    lex: Lexicon,
+    cfg: dict[str, Any],
+    backend: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """范围查询的 LLM 生成：quote_first 走结构化 JSON，legacy 走自由文本。"""
+    style = prompt_style(cfg)
+    a_cfg = (cfg or {}).get("answer", {}) or {}
+    glossary = build_glossary(topic, [res["context"]], lex)
+    if style == "quote_first":
+        prompt = THEME_PROMPT_QUOTE_FIRST.format(
+            doc_title=doc_title,
+            topic=topic,
+            glossary=glossary,
+            context=res["context"],
+            bridge_max_chars=_bridge_max(cfg),
+        )
+    else:
+        prompt = THEME_PROMPT_LEGACY.format(
+            doc_title=doc_title,
+            topic=topic,
+            glossary=glossary,
+            context=res["context"],
+            min_chars=int(a_cfg.get("theme_min_chars", 1500)),
+            max_chars=int(a_cfg.get("theme_max_chars", 4000)),
+        )
+    raw = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="theme")
+    if style != "quote_first":
+        return _clean_generated_answer(raw), [], []
+    data = parse_structured_answer(raw)
+    if data:
+        text = render_structured_sections(data, _clean_generated_answer(raw))
+        return text, (data.get("sections") or []), (data.get("annotations") or [])
+    return _clean_generated_answer(raw), [], []
 
 
 def _post(url: str, payload: dict, headers: dict[str, str] | None = None, timeout: int = 180) -> dict:
@@ -662,43 +760,21 @@ def answer(
     doc_title = store.manifest.get("doc_title", "")
 
     # ---- ③ 生成 ----
+    sections: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
     if backend == "template":
-        text, citation_hits = template_answer(question, hits, doc_title, lex)
-    else:
-        prompt = PROMPT_TEMPLATE.format(
-            glossary=build_glossary(question, [h["chunk"].text for h in hits], lex),
-            context=build_context(hits, doc_title),
-            question=question,
-            max_chars=int(cfg["answer"].get("max_answer_chars", 400)),
+        text, citation_hits, sections, annotations = template_answer(
+            question, hits, doc_title, lex, store, cfg
         )
-        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="point")
-        text = _clean_generated_answer(text)
+        citations = _evidence_citations(citation_hits, doc_title, lex) if citation_hits else []
+    else:
+        text, sections, annotations = _point_generate(question, hits, doc_title, lex, cfg, backend)
         citation_hits = hits
+        citations = _hit_citations(citation_hits, doc_title, lex)
 
     if not citation_hits:
         citation_hits = hits
-
-    citations = [
-        {
-            "n": n,
-            "chunk_id": h["chunk"].chunk_id,
-            "citation": h["chunk"].citation(doc_title),
-            "chapter_path": h["chunk"].chapter_path,
-            "unit": h["chunk"].unit_code(),
-            "unit_title": lex.unit_title(h["chunk"].unit_code()),
-            "volume": h["chunk"].volume(),
-            "start": h["chunk"].start,
-            "end": h["chunk"].end,
-            "page": h["chunk"].page,
-            "chunk_type": h["chunk"].chunk_type,
-            "philosophers": h["chunk"].philosophers,
-            "concepts": h["chunk"].concepts,
-            "eras": h["chunk"].eras,
-            "text": h["chunk"].text,
-            "score": round(h["score"], 6),
-        }
-        for n, h in enumerate(citation_hits, start=1)
-    ]
+        citations = _hit_citations(citation_hits, doc_title, lex)
 
     result = {
         "question": question,
@@ -708,6 +784,8 @@ def answer(
         "gate": gate,
         "answer": text,
         "citations": citations,
+        "sections": sections,
+        "annotations": annotations,
     }
     _ANSWER_CACHE[cache_key] = result
     _ANSWER_CACHE.move_to_end(cache_key)
@@ -771,38 +849,64 @@ def answer_stream(
     doc_title = store.manifest.get("doc_title", "")
 
     # ---- 组装引用（在生成之前发给前端）----
-    citations = [
-        {
-            "n": n,
-            "chunk_id": h["chunk"].chunk_id,
-            "citation": h["chunk"].citation(doc_title),
-            "chapter_path": h["chunk"].chapter_path,
-            "unit": h["chunk"].unit_code(),
-            "unit_title": lex.unit_title(h["chunk"].unit_code()),
-            "volume": h["chunk"].volume(),
-            "start": h["chunk"].start,
-            "end": h["chunk"].end,
-            "page": h["chunk"].page,
-            "chunk_type": h["chunk"].chunk_type,
-            "philosophers": h["chunk"].philosophers,
-            "concepts": h["chunk"].concepts,
-            "eras": h["chunk"].eras,
-            "text": h["chunk"].text,
-            "score": round(h["score"], 6),
-        }
-        for n, h in enumerate(hits, start=1)
-    ]
+    citations = _hit_citations(hits, doc_title, lex)
 
     # ---- ③ 生成 ----
     if backend == "template":
-        text, citation_hits = template_answer(question, hits, doc_title, lex)
+        text, citation_hits, sections, annotations = template_answer(
+            question, hits, doc_title, lex, store, cfg
+        )
+        citations = _evidence_citations(citation_hits, doc_title, lex) if citation_hits else []
         yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
-               "skipped": False, "citations": citations}
+               "skipped": False, "citations": citations,
+               "sections": sections, "annotations": annotations}
         yield {"type": "delta", "text": text}
         yield {"type": "done", "answer": text}
         return
 
-    prompt = PROMPT_TEMPLATE.format(
+    style = prompt_style(cfg)
+    if style == "quote_first":
+        prompt = PROMPT_TEMPLATE_QUOTE_FIRST_STREAM.format(
+            glossary=build_glossary(question, [h["chunk"].text for h in hits], lex),
+            context=build_context(hits, doc_title),
+            question=question,
+            bridge_max_chars=_bridge_max(cfg),
+        )
+        yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
+               "skipped": False, "citations": citations,
+               "sections": [], "annotations": []}
+
+        if backend == "ollama":
+            # Ollama 暂不支持流式（与 legacy 分支保持原行为）
+            text = _clean_generated_answer(ollama_answer(prompt, cfg))
+            data = parse_structured_markdown(text)
+            sections = (data or {}).get("sections") or []
+            annotations = (data or {}).get("annotations") or []
+            yield {"type": "delta", "text": text}
+            yield {"type": "done", "answer": text, "sections": sections, "annotations": annotations}
+            return
+
+        full_text: list[str] = []
+        try:
+            for chunk in api_answer_stream(prompt, cfg, strategy="point"):
+                full_text.append(chunk)
+                yield {"type": "delta", "text": chunk}
+        except Exception as exc:
+            yield {"type": "error", "detail": str(exc)}
+            return
+        cleaned = _clean_generated_answer("".join(full_text))
+        data = parse_structured_markdown(cleaned)
+        if data:
+            text = render_structured_sections(data, cleaned)
+            sections = data.get("sections") or []
+            annotations = data.get("annotations") or []
+        else:
+            text = cleaned
+            sections, annotations = [], []
+        yield {"type": "done", "answer": text, "sections": sections, "annotations": annotations}
+        return
+
+    prompt = PROMPT_TEMPLATE_LEGACY.format(
         glossary=build_glossary(question, [h["chunk"].text for h in hits], lex),
         context=build_context(hits, doc_title),
         question=question,
@@ -834,46 +938,6 @@ def answer_stream(
 # 点查询的提示词要求「3—5 段、不超过 700 字」——它是为**定位一句出处**设计的。
 # 主题式提问要的是相反的东西：按体系结构铺开、覆盖多个单元、保留长引文。
 # 因此单独一套提示词，长度约束差一个量级。
-THEME_PROMPT = """你是一位严谨的哲学文献研究员，正在为《{doc_title}》回答一个**主题式提问**。
-
-提问：{topic}
-
-请依据下面**已按数值单元聚合好**的资料作答。资料是唯一证据，不要把“检索到同一单元”
-当成该主题被讨论的证明，也不要根据几个并置术语自行补出历史因果、人物立场或理论谱系。
-
-写作要求：
-1. 只使用「资料」中的内容，不引入资料之外的知识。只有资料明确说出的内容才能写成事实；
-   资料没有明确支持的内容，必须写“资料未说明”，不能用常识补全；
-   每个实质性论断后标注实际证据编号，如 [E01]；不要自造不存在的编号；
-   `definition/claim/mechanism/contrast/example/background` 是证据类型：
-   background 只能说明“资料提到”，不能单独推出因果、立场或谱系；
-2. 只有在资料确实覆盖多个单元时，才按体系结构组织；资料不足时不要强行写满四节：
-   ① 体系定位——该主题在全书各卷、各数值单元中的分布与位置，最密集处在哪里；
-   ② 核心单元的思想骨架——主题最密集的单元分别讲了什么：核心定义、形成机制、论证路径；
-   ③ 衍生与谱系——与主题并置、由主题派生的其他理论家与单元，说明其关系（上游/同代/后继/反对）；
-   ④ 张力与批判——书中对该主题的保留意见、内部矛盾、未决问题；
-3. 每个核心单元只有在资料直接围绕该主题展开时，才给出 2—3 句论述；
-4. 引文照原文保留（用「」标出），不要改写、不要合并不同单元的表述；
-5. 开篇先用 2—3 句日常语言交代资料实际能支持的结论；不要把“主题与某术语共现”
-   写成“主题就是该术语的表现”；
-6. 不要把“上游/同代/后继/反对”等关系当作默认分类，除非资料明确这样表述；
-   引用只使用证据编号 [E01] 这类格式，不要自行编造页码或单元引用；
-7. **用 Markdown 排版**：需要分节时使用 `### ① 体系定位` 这样的三级标题，节内小标题用 `####`，
-   需要强调时用 `**…**`；只使用这几种标记，不要用表格、HTML 标签或链接；
-8. 用中文，篇幅约 {min_chars}—{max_chars} 字；宁可明确说资料不足，也不要用空泛话填满篇幅；
-9. 写完自查一遍：上文凡是用到「术语速查」里的术语，第一次出现处是否都带了「（即……）」解释？漏掉的补上。
-
-术语速查（**仅供解释术语时取用**，不必把这些词都写进回答；照此说明，不要改写、不要自创定义）：
-{glossary}
-
-资料（已按单元聚合；每段均有证据编号与证据类型）：
-{context}
-
-主题：{topic}
-
-回答："""
-
-
 def _theme_sentences(text: str, terms: list[str], max_chars: int) -> str:
     """从段落群里挑出与主题最相关的句子，保留原文顺序与完整句。"""
     sents = _sentences(text) or [text]
@@ -937,6 +1001,7 @@ def _theme_citations(res: dict[str, Any], doc_title: str) -> list[dict[str, Any]
             "unit": evidence["unit"],
             "unit_title": evidence["unit_title"],
             "volume": evidence["volume"],
+            "char_span": f"{evidence['start']}-{evidence['end']}",
             "page": evidence["page"],
             "start": evidence["start"],
             "end": evidence["end"],
@@ -951,27 +1016,27 @@ def _theme_citations(res: dict[str, Any], doc_title: str) -> list[dict[str, Any]
     ]
 
 
-def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
-    """离线（template 后端）范围查询：按单元分节，每节给主题句群 + 关键引文。
+def render_theme(
+    res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """离线（template 后端）范围查询：可信基线编辑稿。
 
-    与点查询的 `template_answer` 的区别：那里每块只取 1 句、最多 8 句；
-    这里每个核心单元取一整段「主题句群」（约 300 字），并按体系结构分节，
-    产出的是有骨架的短篇论述，而不是 8 条孤立摘录。
+    每节 = 原文完整段（逐字不改）+ 坐标出处；节标题、排序、分节由代码按
+    单元坐标与密度决定，不依赖模型。
+    返回 (text, citations, sections, annotations)。
     """
     t_cfg = cfg.get("theme", {}) or {}
-    per_unit = int(t_cfg.get("answer_chars_per_unit", 340))
     core_n = int(t_cfg.get("core_units", 6))
     ext_n = int(t_cfg.get("extended_units", 6))
     doc_title = "《" + str(cfg.get("doc", {}).get("title", "")) + "》"
+    doc_title_plain = str(cfg.get("doc", {}).get("title", ""))
 
     a, n = res["anchors"], res["counts"]
-    terms = [t for t in [res["topic"], *a["philosophers"], *a["concepts"]] if t]
     units = res["units"]
     core, ext = units[:core_n], units[core_n : core_n + ext_n]
 
-    # 概览（命中块数 / 覆盖单元 / 语义补充）由输出层统一渲染（`render_answer` 的
-    # 「聚合概览」一节），正文里不再重复，直接从结构分节开始。
     lines: list[str] = []
+    sections: list[dict[str, Any]] = []
     if res["seed_mode"]:
         lines.append("> 该主题未登录词典，锚点由种子检索反推得到。")
         lines.append("")
@@ -991,27 +1056,43 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
         lines.append("- 覆盖卷：" + "、".join(f"{v}（{c} 单元）" for v, c in vols.most_common()))
     lines.append("")
 
-    # ---- 二、核心单元 ----
-    lines.append(f"### 二、核心单元（按命中密度，前 {len(core)} 个）")
-    for u in core:
-        head = f"#### {u['code']} {u['title']}" if u["code"] else f"#### {u['title']}"
-        lines.append(head)
+    def _emit_unit(u: dict[str, Any], heading_level: str) -> None:
+        """把单个单元渲染为「原文完整段 + 坐标出处」一节。"""
+        head = f"{u['code']} {u['title']}".strip() if u["code"] else u["title"]
+        lines.append(f"{heading_level} {head}")
         lines.append(f"*{u['volume'] or '—'}｜命中 {u['hits']}/{u['total']} 块（密度 {u['density']}）*")
         lines.append("")
         groups = u.get("selected_groups") or u["groups"]
-        body = _theme_sentences(
-            "\n".join(g["text"] for g in groups),
-            terms,
-            per_unit,
-        )
-        lines.append(body)
-        # 该单元内若有引文块，补一条关键引文（专题稿的「金句」来源）。
-        # 优先挑长度适中（10–140 字）且主题词密度高的，避免选出被切碎的残句。
+        paragraphs: list[dict[str, Any]] = []
+        for g in groups:
+            cite = _group_citation(doc_title_plain, u, g)
+            lines.append(f"> 出处：{cite}")
+            lines.append("")
+            lines.append(g["text"])
+            lines.append("")
+            paragraphs.append({"text": g["text"], "refs": []})
         qs = [q for g in groups for q in g["quotes"] if 10 <= len(q) <= 140]
         if qs:
+            terms = [t for t in [res["topic"], *a["philosophers"], *a["concepts"]] if t]
             best = max(qs, key=lambda q: sum(1 for t in terms if t in q) * 100 + len(q))
             lines.append(f"> 「{best}」")
-        lines.append("")
+            lines.append("")
+        sections.append({
+            "heading": head,
+            "bridge": "",
+            "unit": u["code"],
+            "unit_title": u["title"],
+            "volume": u["volume"],
+            "density": u["density"],
+            "hits": u["hits"],
+            "paragraphs": paragraphs,
+        })
+
+    # ---- 二、核心单元 ----
+    lines.append(f"### 二、核心单元（按命中密度，前 {len(core)} 个）")
+    for u in core:
+        _emit_unit(u, "####")
+    lines.append("")
 
     citations = _theme_citations(res, doc_title)
     # ---- 三、衍生与谱系 ----
@@ -1025,12 +1106,7 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
         for u in ext:
             groups = u.get("selected_groups") or u["groups"]
             if groups:
-                snippet = _theme_sentences(
-                    "\n".join(g["text"] for g in groups),
-                    terms,
-                    per_unit // 2,
-                )
-                lines.append(f"- **{u['code']} {u['title']}**（{u['hits']} 块）：{snippet}")
+                _emit_unit(u, "####")
         lines.append("")
 
     # ---- 四、引用来源 ----
@@ -1040,9 +1116,10 @@ def render_theme(res: dict[str, Any], lex: Lexicon, cfg: dict[str, Any]) -> tupl
     lines.append("")
     lines.append(
         f"> 本回答由离线抽取式后端生成（`answer.backend=template`），共聚合 {n['direct']} 块证据、"
-        f"上下文 {res['context_chars']} 字。接入本地模型（`backend: ollama`）可获得连贯的成篇论述。"
+        f"上下文 {res['context_chars']} 字。原文段落逐字照录，未做改写。"
     )
-    return "\n".join(lines), citations
+    annotations = build_annotations(res["topic"], [res["context"]], lex)
+    return "\n".join(lines), citations, sections, annotations
 
 
 def theme_answer(
@@ -1072,6 +1149,8 @@ def theme_answer(
             "gate": None,
             "answer": text,
             "citations": [],
+            "sections": [],
+            "annotations": [],
             "theme": {
                 "seed_mode": res["seed_mode"],
                 "anchors": res["anchors"],
@@ -1083,19 +1162,9 @@ def theme_answer(
         }
 
     if backend == "template":
-        text, citations = render_theme(res, lex, cfg)
+        text, citations, sections, annotations = render_theme(res, lex, cfg)
     else:
-        a_cfg = cfg["answer"]
-        prompt = THEME_PROMPT.format(
-            doc_title=doc_title,
-            topic=topic,
-            glossary=build_glossary(topic, [res["context"]], lex),
-            context=res["context"],
-            min_chars=int(a_cfg.get("theme_min_chars", 1500)),
-            max_chars=int(a_cfg.get("theme_max_chars", 4000)),
-        )
-        text = ollama_answer(prompt, cfg) if backend == "ollama" else api_answer(prompt, cfg, strategy="theme")
-        text = _clean_generated_answer(text)
+        text, sections, annotations = _theme_generate(topic, res, doc_title, lex, cfg, backend)
         citations = _theme_citations(res, doc_title)
 
     return {
@@ -1108,6 +1177,8 @@ def theme_answer(
         "gate": None,
         "answer": text,
         "citations": citations,
+        "sections": sections,
+        "annotations": annotations,
         "theme": {
             "seed_mode": res["seed_mode"],
             "anchors": res["anchors"],
@@ -1157,6 +1228,8 @@ def _theme_answer_stream(
             "gate": gate,
             "skipped": False,
             "citations": [],
+            "sections": [],
+            "annotations": [],
             "theme": theme_meta,
             "question": question,
         }
@@ -1180,16 +1253,61 @@ def _theme_answer_stream(
     }
 
     if backend == "template":
-        text, _ = render_theme(res, lex, cfg)
+        text, citations, sections, annotations = render_theme(res, lex, cfg)
         yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
                "skipped": False, "citations": citations, "theme": theme_meta,
+               "sections": sections, "annotations": annotations,
                "question": question}
         yield {"type": "delta", "text": text}
         yield {"type": "done", "answer": text}
         return
 
+    style = prompt_style(cfg)
+    if style == "quote_first":
+        prompt = THEME_PROMPT_QUOTE_FIRST_STREAM.format(
+            doc_title=doc_title,
+            topic=topic,
+            glossary=build_glossary(topic, [res["context"]], lex),
+            context=res["context"],
+            bridge_max_chars=_bridge_max(cfg),
+        )
+        yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
+               "skipped": False, "citations": citations, "theme": theme_meta,
+               "sections": [], "annotations": [],
+               "question": question}
+
+        if backend == "ollama":
+            # Ollama 暂不支持流式（与 legacy 分支保持原行为）
+            text = _clean_generated_answer(ollama_answer(prompt, cfg))
+            data = parse_structured_markdown(text)
+            sections = (data or {}).get("sections") or []
+            annotations = (data or {}).get("annotations") or []
+            yield {"type": "delta", "text": text}
+            yield {"type": "done", "answer": text, "sections": sections, "annotations": annotations}
+            return
+
+        full_text: list[str] = []
+        try:
+            for chunk in api_answer_stream(prompt, cfg, strategy="theme"):
+                full_text.append(chunk)
+                yield {"type": "delta", "text": chunk}
+        except Exception as exc:
+            yield {"type": "error", "detail": str(exc)}
+            return
+        cleaned = _clean_generated_answer("".join(full_text))
+        data = parse_structured_markdown(cleaned)
+        if data:
+            text = render_structured_sections(data, cleaned)
+            sections = data.get("sections") or []
+            annotations = data.get("annotations") or []
+        else:
+            text = cleaned
+            sections, annotations = [], []
+        yield {"type": "done", "answer": text, "sections": sections, "annotations": annotations}
+        return
+
     a_cfg = cfg["answer"]
-    prompt = THEME_PROMPT.format(
+    prompt = THEME_PROMPT_LEGACY.format(
         doc_title=doc_title,
         topic=topic,
         glossary=build_glossary(topic, [res["context"]], lex),

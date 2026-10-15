@@ -45,6 +45,7 @@ _PATH_KEYS = [
     ("lexicon", "philosophers"),
     ("lexicon", "concepts"),
     ("lexicon", "taxonomy"),
+    ("lexicon", "themes"),
     ("output", "dir"),
 ]
 
@@ -113,6 +114,7 @@ def get_lexicon(cfg: dict) -> Lexicon:
         resolve("philosophers", "philosophers.yaml"),
         resolve("concepts", "concepts.yaml"),
         resolve("taxonomy", "哲学大纲_体系.yaml"),
+        themes_path=resolve("themes", "themes.yaml"),
     )
 
 

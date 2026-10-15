@@ -21,6 +21,7 @@ lexicon:
   philosophers: lexicon/philosophers.yaml   # 理论家：别名归一 + 生卒年 + 流派
   concepts: lexicon/concepts.yaml           # 概念：别名 + 归属 + 定义
   taxonomy: lexicon/哲学大纲_体系.yaml        # 体系目录：字头 / 四层 / 四话语 / 338 单元
+  themes: lexicon/themes.yaml                # 主题（流派/思潮）：名称 + 别名 + 理论家/概念/单元锚点
 
 # ---------- 3. 分块 ----------
 chunk:
@@ -104,6 +105,12 @@ answer:
   max_answer_chars: 850     # 点查询提示词里对回答长度的约束
                             # 比早期的 700 放宽：现在每个术语首次出现都要带「（即…）」
                             # 解释，内联解释本身要吃掉 100—150 字，按 700 约束模型会稳定超限。
+  # —— 原文优先/编辑式（quote_first）旋钮 ——
+  # quote_first 模式：原文即正文，LLM 只做节标题、单元串接语、极少量过渡；
+  # 术语解释作为 annotations 数组随 payload/渲染输出，不混进正文。
+  bridge_max_chars: 60      # 每节衔接/过渡语上限（字）
+  quote_first: true         # 旧旋钮：false 等价于 prompt_style: legacy
+  prompt_style: quote_first # quote_first | legacy（A/B 切换）
   theme_min_chars: 1500     # 范围查询（LLM 后端）成篇篇幅下限
   theme_max_chars: 4000     # 范围查询（LLM 后端）成篇篇幅上限
 

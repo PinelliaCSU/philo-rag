@@ -85,6 +85,11 @@ def _anchor(lex: Lexicon, topic: str) -> tuple[list[str], list[str], list[str]]:
         title = lex.unit_title(code)
         if topic and topic in title:
             units.append(code)
+    # 流派/思潮级主题回退：理论家与概念都未命中时，用主题词典补锚点。
+    if not phils and not concs:
+        t_phils, t_concs, t_units = lex.theme_anchors(topic)
+        if t_phils or t_concs or t_units:
+            phils, concs, units = t_phils, t_concs, t_units
     return phils, concs, units
 
 

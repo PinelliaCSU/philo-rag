@@ -12,15 +12,15 @@
   <h1>哲学大纲 · 知识库</h1>
 </header>
 
-<nav class="tabbar" aria-label="主要功能">
-  <button type="button" class="tab on" data-v="ask" aria-pressed="true">溯源回答</button>
-  <button type="button" class="tab" data-v="search" aria-pressed="false">检索</button>
-  <button type="button" class="tab" data-v="facet" aria-pressed="false">分面 · 体系</button>
+<nav class="tabbar" id="panel-nav" aria-label="功能面板">
+  <button type="button" class="tab" data-p="concept" aria-pressed="false">概念卡</button>
+  <button type="button" class="tab" data-p="search" aria-pressed="false">术语 / 引文检索</button>
+  <button type="button" class="tab" data-p="map" aria-pressed="false">体系地图</button>
 </nav>
 
 <main>
 
-  <!-- ================= 视图一：溯源回答 ================= -->
+  <!-- ============ 主入口：溯源回答（唯一主视图，永远可见） ============ -->
   <section class="view on" id="v-ask">
     <div class="ask-top">
       <div class="row">
@@ -46,6 +46,8 @@
           <p class="muted intro-note">
             上面「提问方式」可手动切换，也可以留在<b>自动判定</b>由系统按措辞决定。
             切换后下方会给出该方式的适用范围与示例，点示例即可直接发问。
+            回答末尾的「术语注解」可点击，点击术语即打开<b>概念卡</b>；
+            <b>术语 / 引文检索</b>与<b>体系地图</b>从顶部按钮召唤。
           </p>
         </div>
       </div>
@@ -62,30 +64,52 @@
     </div>
   </section>
 
-  <!-- ================= 视图二：检索 ================= -->
-  <section class="view" id="v-search">
-    <div class="search-top">
-      <div class="row">
-        <span class="label">检索方式</span>
-        <div class="seg" id="seg-search">
-          <button type="button" data-m="term" class="on" aria-pressed="true">术语 / 概念</button>
-          <button type="button" data-m="quote" aria-pressed="false">引文 / 原话</button>
-        </div>
-        <span class="muted" id="search-scope"></span>
-      </div>
-      <div class="row" id="search-form"></div>
+  <!-- ============ 可召唤侧栏：概念卡 / 检索 / 体系地图 ============ -->
+  <aside class="panel" id="panel" aria-label="功能面板">
+    <div class="panel-head">
+      <h3 id="panel-title">概念卡</h3>
+      <button class="ghost" id="panel-close">关闭</button>
     </div>
-    <div class="search-body">
-      <div id="search-head"></div>
-      <div id="search-list"></div>
-      <div class="pager-row" id="search-pager"></div>
-    </div>
-  </section>
+    <div class="panel-body">
 
-  <!-- ================= 视图三：分面 · 体系 ================= -->
-  <section class="view" id="v-facet">
-    <div class="facet-body" id="facet-out"></div>
-  </section>
+      <!-- 面板一：概念卡 -->
+      <section class="panel-pane on" id="pane-concept">
+        <div class="row concept-form">
+          <input type="text" id="concept-q" placeholder="输入术语，如：大他者 / 客体小a / 场域论">
+          <button id="concept-go">查看概念卡</button>
+        </div>
+        <div id="concept-out">
+          <div class="card muted">输入术语查看概念卡；也可以点击回答正文「术语注解」里的术语直接打开。</div>
+        </div>
+      </section>
+
+      <!-- 面板二：术语 / 引文检索 -->
+      <section class="panel-pane" id="pane-search">
+        <div class="search-top">
+          <div class="row">
+            <span class="label">检索方式</span>
+            <div class="seg" id="seg-search">
+              <button type="button" data-m="term" class="on" aria-pressed="true">术语 / 概念</button>
+              <button type="button" data-m="quote" aria-pressed="false">引文 / 原话</button>
+            </div>
+            <span class="muted" id="search-scope"></span>
+          </div>
+          <div class="row" id="search-form"></div>
+        </div>
+        <div class="search-body">
+          <div id="search-head"></div>
+          <div id="search-list"></div>
+          <div class="pager-row" id="search-pager"></div>
+        </div>
+      </section>
+
+      <!-- 面板三：体系地图 -->
+      <section class="panel-pane" id="pane-map">
+        <div class="map-body" id="map-out"></div>
+      </section>
+
+    </div>
+  </aside>
 
 </main>
 

@@ -19,10 +19,15 @@ from philo_rag.cli import load_config, open_store
 from philo_rag.retrieve import hybrid_search
 
 CASES = [
-    ("马克思在主义主义体系中的位置是什么？", ["马克思"]),
-    ("黑格尔的核心思想是什么？", ["黑格尔"]),
     ("精神分析在书里是怎么被处理的？", ["精神分析"]),
-    ("什么是字头？", ["字头"]),
+    ("德国观念论在书里是怎么被处理的？", ["德国观念论"]),
+    ("结构主义在书里是怎么被处理的？", ["结构主义"]),
+    ("后结构主义在书里是怎么被处理的？", ["后结构主义"]),
+    ("存在主义在书里是怎么被处理的？", ["存在主义"]),
+    ("法兰克福学派在书里是怎么被处理的？", ["法兰克福学派"]),
+    ("现象学在书里是怎么被处理的？", ["现象学"]),
+    ("实用主义在书里是怎么被处理的？", ["实用主义"]),
+    ("分析哲学在书里是怎么被处理的？", ["分析哲学"]),
 ]
 
 
@@ -35,10 +40,20 @@ def main() -> None:
         hits = hybrid_search(store, question, cfg, lex)
         doc_title = store.manifest.get("doc_title", "")
 
-        # 语料中真正「相关」的块：元数据命中关键词
+        # 语料中真正「相关」的块：元数据命中关键词 + 主题层锚点（流派/思潮级）
+        anchor_phils: list[str] = []
+        anchor_concs: list[str] = []
+        anchor_units: list[str] = []
+        for key in keys:
+            tp, tc, tu = lex.theme_anchors(key)
+            anchor_phils.extend(tp)
+            anchor_concs.extend(tc)
+            anchor_units.extend(tu)
+        related_keys = list(dict.fromkeys([*keys, *anchor_phils, *anchor_concs]))
         related = [
             c for c in store.chunks
-            if any(k in c.philosophers or k in c.concepts for k in keys)
+            if any(k in c.philosophers or k in c.concepts for k in related_keys)
+            or (anchor_units and any(u in c.unit_codes() for u in anchor_units))
         ]
 
         print("=" * 78)

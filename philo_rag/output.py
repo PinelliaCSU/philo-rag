@@ -75,6 +75,12 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
                     f"{u['code'] or '前言'} {u['hits']}块" for u in top))
             lines.append("")
         lines += [res["answer"], ""]
+        annotations = res.get("annotations") or []
+        for a in annotations:
+            if isinstance(a, dict) and a.get("term"):
+                lines.append(f"[注解] {a['term']}：{a.get('explanation', '')}")
+        if annotations:
+            lines.append("")
         for c in res["citations"]:
             lines.append(f"[{c['n']}] {c['citation']}")
         return "\n".join(lines)
@@ -108,6 +114,13 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
             out.append("- 共现理论家：" + "、".join(f"{n}（{k}）" for n, k in lin[:10]))
         out.append("")
     out.append(f"## 回答\n\n{res['answer']}\n")
+    annotations = res.get("annotations") or []
+    if annotations:
+        out.append("## 术语注解\n")
+        for a in annotations:
+            if isinstance(a, dict) and a.get("term"):
+                out.append(f"- **{a['term']}**：{a.get('explanation', '')}")
+        out.append("")
     show = (cfg or {}).get("output", {}).get("show_citations", True)
     if show and res["citations"]:
         out.append("## 引用来源\n")
