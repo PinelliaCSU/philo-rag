@@ -25,6 +25,7 @@ share/python-wheels/
 
 # Test, coverage, and type-checker artifacts
 .pytest_cache/
+pytest-of-*/
 .coverage
 .coverage.*
 htmlcov/

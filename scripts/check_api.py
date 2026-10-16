@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from philo_rag.answer import api_answer  # noqa: E402
-from philo_rag.cli import load_config     # noqa: E402
+from philo_rag.cli import load_config  # noqa: E402
+from philo_rag.llm import api_answer  # noqa: E402
 
 
 def main() -> None:

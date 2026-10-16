@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from philo_rag.answer import answer as answer_fn  # noqa: E402
-from philo_rag.cli import get_lexicon, load_config, open_store  # noqa: E402
+from philo_rag.cli import load_config, open_store  # noqa: E402
 
 QUESTIONS = [
     "什么是字头？",

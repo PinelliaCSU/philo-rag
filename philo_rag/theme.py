@@ -42,7 +42,7 @@ UNKNOWN_UNIT = "（前言·体例·总纲）"
 def _filter_relevant_sentences(text: str, terms: list[str], max_chars: int) -> str:
     """从段落群中保留含主题词的句子，去掉无关句，提高上下文信息密度。
 
-    与 answer.py 的 _theme_sentences 不同：这里不做打分排序，只做保留/丢弃
+    与 answer_theme.py 的 _theme_sentences 不同：这里不做打分排序，只做保留/丢弃
     二值判断，保持原文顺序。没有命中任何主题词时退回截断。
     """
     import re

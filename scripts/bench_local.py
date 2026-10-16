@@ -11,8 +11,8 @@ if str(_ROOT) not in sys.path:
 
 from philo_rag.cli import get_lexicon, load_config
 from philo_rag.index import Store
-from philo_rag.theme import theme_search
 from philo_rag.retrieve import hybrid_search
+from philo_rag.theme import theme_search
 
 
 def main():

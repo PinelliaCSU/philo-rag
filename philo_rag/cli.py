@@ -295,7 +295,7 @@ def cmd_demo(cfg: dict, args: argparse.Namespace) -> None:
     if backend != "template":
         _rule(f"生成后端连通性探测：{backend}")
         try:
-            from .answer import generate_text
+            from .llm import generate_text
 
             t0 = time.perf_counter()
             reply = generate_text("请只回复两个字：就绪", cfg)

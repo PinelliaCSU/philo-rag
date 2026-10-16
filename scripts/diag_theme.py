@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, ".")
 
-from philo_rag.answer import _topic_evidence, build_context
+from philo_rag.answer_evidence import _topic_evidence, build_context
 from philo_rag.cli import load_config, open_store
 from philo_rag.retrieve import hybrid_search
 

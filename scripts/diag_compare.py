@@ -4,13 +4,14 @@
 """
 from __future__ import annotations
 
-import collections
 import sys
 from pathlib import Path
 
 sys.path.insert(0, ".")
 
-from philo_rag.answer import _topic_evidence, answer as ask_fn, build_context, theme_answer
+from philo_rag.answer import answer as ask_fn
+from philo_rag.answer_evidence import _topic_evidence, build_context
+from philo_rag.answer_theme import theme_answer
 from philo_rag.cli import load_config, open_store
 from philo_rag.retrieve import hybrid_search
 

@@ -18,7 +18,6 @@
 """
 from __future__ import annotations
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -28,21 +27,20 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from philo_rag.answer import answer
 from philo_rag.cli import get_lexicon, load_config
+from philo_rag.embed import get_embedder
 from philo_rag.gate import check_question, check_relevance
 from philo_rag.index import Store
+from philo_rag.lexicon import Lexicon
+from philo_rag.rerank import _rerank
 from philo_rag.retrieve import (
-    _dense_rank,
     _dedupe,
-    _load_reranker,
-    _rerank,
+    _dense_rank,
     _sparse_rank,
-    hybrid_search,
     rrf_fuse,
 )
-from philo_rag.answer import answer, classify_question
-from philo_rag.embed import get_embedder
-from philo_rag.lexicon import Lexicon
+from philo_rag.routing import classify_question
 
 
 def _fmt(ms: float) -> str:
@@ -66,7 +64,7 @@ def bench_point(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
     gate_cfg = cfg.get("gate", {})
     if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
         t0 = time.perf_counter()
-        rel_gate = check_relevance(store, question, cfg)
+        rel_gate = check_relevance(store, question, cfg)  # noqa: F841 —— 只测耗时，结果不参与后续
         t1 = time.perf_counter()
         timings.append(("①b 语义相关性别挡", (t1 - t0) * 1000))
     else:
@@ -92,7 +90,6 @@ def bench_point(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
     timings.append(("③ 稠密检索 _dense_rank", (t1 - t0) * 1000))
 
     # ④ 稀疏检索
-    from philo_rag.index import tokenize
     t0 = time.perf_counter()
     sparse = _sparse_rank(store, expanded)
     t1 = time.perf_counter()
@@ -114,7 +111,6 @@ def bench_point(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
 
     # ⑥ 去重
     # 先构造 results（简化版，不含完整加权逻辑）
-    from philo_rag.schema import Chunk
     scored: list[tuple[float, int, int]] = []
     dense_pos = {i: r for r, (i, _) in enumerate(dense, start=1)}
     sparse_pos = {i: r for r, (i, _) in enumerate(sparse, start=1)}
@@ -146,17 +142,17 @@ def bench_point(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
         timings.append(("⑦ 重排 _rerank", 0.0))
 
     # ⑧ 上下文组装
-    from philo_rag.answer import build_context
+    from philo_rag.answer_evidence import build_context
     top_k = int(r_cfg["final_top_k"])
     results = results[:top_k]
     t0 = time.perf_counter()
-    ctx = build_context(results, store.manifest.get("doc_title", ""))
+    ctx = build_context(results, store.manifest.get("doc_title", ""))  # noqa: F841 —— 只测耗时
     t1 = time.perf_counter()
     timings.append(("⑧ 上下文组装", (t1 - t0) * 1000))
 
     # 汇总
     total = sum(ms for _, ms in timings)
-    print(f"\n各环节耗时：")
+    print("\n各环节耗时：")
     for name, ms in timings:
         bar = "█" * max(1, int(ms / max(total, 1) * 40))
         print(f"  {name:30s} {_fmt(ms)}  {bar}")
@@ -179,8 +175,8 @@ def bench_theme(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
     print(f"范围查询基准测试：{question!r}")
     print(f"{'='*60}")
 
-    from philo_rag.theme import theme_search, _anchor, _seed_anchor, _collect, _aggregate_by_unit
-    from philo_rag.answer import theme_answer
+    from philo_rag.answer_theme import theme_answer
+    from philo_rag.theme import _aggregate_by_unit, _anchor, _collect, _seed_anchor
 
     timings: list[tuple[str, float]] = []
     topic = question
@@ -210,7 +206,6 @@ def bench_theme(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
     timings.append(("③ 三层召回 _collect", (t1 - t0) * 1000))
 
     direct = collected["meta"] + collected["literal"]
-    direct_ids = {c.chunk_id for c in direct}
 
     # ④ 语义补充 hybrid_search（已在 theme_search 中移除，这里测量空操作）
     timings.append(("④ 语义补充 hybrid_search", 0.0))
@@ -249,7 +244,7 @@ def bench_theme(question: str, store: Store, lex: Lexicon, cfg: dict) -> None:
 
     # 汇总
     total = sum(ms for _, ms in timings)
-    print(f"\n各环节耗时：")
+    print("\n各环节耗时：")
     for name, ms in timings:
         bar = "█" * max(1, int(ms / max(total, 1) * 40))
         print(f"  {name:30s} {_fmt(ms)}  {bar}")

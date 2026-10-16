@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 import collections
-import json
 import re
 from typing import Any
 
-from .lexicon import Lexicon
+from .citations import group_citation
 from .index import Store
+from .lexicon import Lexicon
 from .retrieve import _definition_terms
 from .schema import Chunk
 
@@ -125,22 +125,6 @@ def _topic_evidence(
 # --------------------------------------------------------------------------- #
 # 新链路：完整段证据 + 相邻块合并（复用 theme._aggregate_by_unit）
 # --------------------------------------------------------------------------- #
-def _group_citation(doc_title: str, unit: dict[str, Any], group: dict[str, Any]) -> str:
-    """段落群的坐标出处：书名 · 单元 · 卷 · 页码 · 字符区间。"""
-    parts: list[str] = []
-    if doc_title:
-        parts.append(f"《{doc_title}》")
-    loc = f"{unit['code']} {unit['title']}".strip() if unit.get("code") else unit.get("title", "")
-    if loc:
-        parts.append(loc)
-    if unit.get("volume"):
-        parts.append(unit["volume"])
-    if group.get("page"):
-        parts.append(f"第 {group['page']}–{group['page_end']} 页")
-    parts.append(f"字符 {group['start']}-{group['end']}")
-    return " · ".join(parts)
-
-
 def build_point_evidence(
     question: str,
     hits: list[dict[str, Any]],
@@ -208,7 +192,7 @@ def build_point_evidence(
                 "page_end": g["page_end"],
                 "chunk_id": g["chunk_ids"][0] if g["chunk_ids"] else "",
                 "chunk_ids": g["chunk_ids"],
-                "citation": _group_citation(doc_title, u, g),
+                "citation": group_citation(doc_title, u, g),
                 "score": best_score,
                 "role": _role(text, topic_terms),
                 "evidence_score": _sentence_score(text, q_terms, topic_terms),
@@ -383,53 +367,3 @@ def build_annotations(
         if definition:
             out.append({"term": name, "explanation": definition})
     return out
-
-
-# --------------------------------------------------------------------------- #
-# LLM 结构化输出：解析 + 确定性渲染
-# --------------------------------------------------------------------------- #
-def parse_structured_answer(raw: str) -> dict[str, Any] | None:
-    """从 LLM 输出中宽松提取 JSON（容忍 ```json 代码块与前后缀）。"""
-    if not raw:
-        return None
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
-    if fence:
-        text = fence.group(1).strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        data = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def render_structured_sections(data: dict[str, Any], fallback: str = "") -> str:
-    """把 LLM 输出的 sections 确定性渲染为 Markdown（模型不负责排版）。"""
-    sections = (data or {}).get("sections") or []
-    if not sections:
-        return fallback or "资料不足：索引中未找到与问题相关的内容。"
-    lines: list[str] = []
-    for i, sec in enumerate(sections, start=1):
-        if not isinstance(sec, dict):
-            continue
-        heading = str(sec.get("heading") or f"第{i}节").strip()
-        lines.append(f"### {heading}")
-        bridge = str(sec.get("bridge") or "").strip()
-        if bridge:
-            lines.append(bridge)
-            lines.append("")
-        for p in sec.get("paragraphs") or []:
-            if not isinstance(p, dict):
-                continue
-            text = str(p.get("text") or "").strip()
-            if not text:
-                continue
-            refs = p.get("refs") or []
-            suffix = "".join(f"[{r}]" for r in refs)
-            lines.append(f"{text} {suffix}".strip())
-            lines.append("")
-    return "\n".join(lines).strip()

@@ -142,6 +142,21 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 | `GET /api/facets` | 分面统计 |
 | `GET /api/units` | 体系目录 |
 
+## 开发与自检
+
+改动检索、生成或服务层后，先跑自动化回归再手测：
+
+```powershell
+pip install -e ".[dev]"          # pytest + ruff（httpx 供 fastapi TestClient）
+python -m pytest                 # 全量回归；索引与模型只装载一次，约 1 分钟
+python -m ruff check philo_rag scripts tests
+```
+
+`pytest` 里冻结了检索基线（Hit@1 ≥ 96.43%、Hit@3 = 100%、MRR ≥ 0.9821），
+回归不达标即判失败。生成后端的用例一律走离线 `template`，或 monkeypatch 后端函数，
+因此**不配 API Key 也能跑全套回归**。用例清单与各文件守住的约束见
+[`docs/架构设计.md`](docs/架构设计.md) 的「13.1 自动化回归」。
+
 ## 目录
 
 ```text
@@ -152,6 +167,8 @@ models/                     本地嵌入与重排模型
 store/                      索引文件
 outputs/                    导出的回答和检索结果
 philo_rag/                  Python 包、CLI、服务端和前端
+tests/                      pytest 回归用例
+scripts/                    巡检与诊断脚本（闸门 / 说话人 / 连通性 / 基准）
 docs/                       详细使用与架构说明
 ```
 

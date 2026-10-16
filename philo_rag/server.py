@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +34,26 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .answer import answer as answer_fn, answer_stream as answer_stream_fn
+from .answer import answer as answer_fn
+from .answer import answer_stream as answer_stream_fn
 from .index import Store
 from .lexicon import Lexicon
 from .retrieve import facet_summary, quote_payload, term_lookup
+from .schema import Chunk
 
-_STATE: dict[str, Any] = {"cfg": None, "store": None, "lex": None, "store_dir": None}
+
+@dataclass
+class Runtime:
+    """服务进程内常驻的一份索引与词典：装配一次，所有请求共用。"""
+
+    cfg: dict[str, Any]
+    store: Store
+    lex: Lexicon
+
+
+# 模块级 `app` 与 serve() 会各装配一次应用，这里缓存已装配的那一份，
+# 避免同一索引被重复载入两次（那要白等一整轮「载入索引 + 加载模型」）。
+_RUNTIME: Runtime | None = None
 
 # 前端静态资源目录（随包分发）
 _WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -69,16 +84,18 @@ class AskRequest(BaseModel):
     focus: str | None = None
 
 
-def _load(cfg: dict) -> None:
+def _load(cfg: dict) -> Runtime:
+    """装配（或复用）进程内常驻的索引与词典，返回各请求共用的 Runtime。"""
+    global _RUNTIME
+
     from .cli import get_lexicon
 
     store_dir = Path(cfg["doc"]["store_dir"])
 
-    # 模块级 `app` 与 serve() 会各装配一次应用；同一个索引已经就绪时直接复用，
-    # 否则启动要白等一整轮「载入索引 + 加载模型」。
-    if _STATE["store"] is not None and _STATE["store_dir"] == str(store_dir):
-        _STATE["cfg"] = cfg
-        return
+    # 同一个索引已经就绪时直接复用，否则启动要白等一整轮「载入索引 + 加载模型」。
+    if _RUNTIME is not None and Path(_RUNTIME.cfg["doc"]["store_dir"]) == store_dir:
+        _RUNTIME.cfg = cfg
+        return _RUNTIME
 
     lex = get_lexicon(cfg)
     if not (store_dir / "chunks.jsonl").exists():
@@ -87,13 +104,13 @@ def _load(cfg: dict) -> None:
     t0 = time.perf_counter()
     store = Store.load(store_dir, lex)
     print(f"[info] 索引已载入：{len(store.chunks)} 块（{time.perf_counter() - t0:.1f}s）", flush=True)
-    _STATE.update(cfg=cfg, store=store, lex=lex, store_dir=str(store_dir))
+    _RUNTIME = Runtime(cfg=cfg, store=store, lex=lex)
 
     # 启动即预热：嵌入模型（约 10s）与重排模型（构造约 1s，权重 mmap 懒加载）
     # 都在这里加载一次并常驻进程缓存，之后每次提问只做「编码 + 检索 + 重排」，
     # 不会重新加载模型——提问变慢时先看 _rerank，而不是怀疑模型被重建。
     from .embed import get_embedder
-    from .retrieve import _load_reranker
+    from .rerank import _load_reranker
 
     t0 = time.perf_counter()
     get_embedder(cfg["embedding"], cfg.get("_root"))
@@ -102,10 +119,11 @@ def _load(cfg: dict) -> None:
         t0 = time.perf_counter()
         if _load_reranker(cfg) is not None:
             print(f"[info] 重排模型已加载并常驻内存（{time.perf_counter() - t0:.1f}s）", flush=True)
+    return _RUNTIME
 
 
 def create_app(cfg: dict) -> FastAPI:
-    _load(cfg)
+    rt = _load(cfg)
     app = FastAPI(title="哲学大纲知识库", version="1.1.0")
 
     # 生成层出错（缺 key、接口报错、网络不通…）时不要把 500 裸奔给前端，
@@ -138,7 +156,7 @@ def create_app(cfg: dict) -> FastAPI:
     # ---------------- JSON API ----------------
     @app.get("/api/stats")
     def stats() -> dict:
-        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex, cfg = rt.store, rt.lex, rt.cfg
         a_cfg = cfg.get("answer", {}) or {}
         return {
             "manifest": store.manifest,
@@ -157,15 +175,15 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/facets")
     def facets() -> dict:
-        return facet_summary(_STATE["store"], _STATE["lex"])
+        return facet_summary(rt.store, rt.lex)
 
     @app.get("/api/units")
     def units() -> list[dict]:
-        return _STATE["lex"].units
+        return rt.lex.units
 
     @app.get("/api/concepts")
     def concepts() -> list[dict]:
-        lex: Lexicon = _STATE["lex"]
+        lex: Lexicon = rt.lex
         return [
             {
                 "name": name,
@@ -178,7 +196,7 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
-        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex, cfg = rt.store, rt.lex, rt.cfg
         return answer_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus)
 
     @app.post("/api/ask_stream")
@@ -197,7 +215,7 @@ def create_app(cfg: dict) -> FastAPI:
         """
         import json as _json
 
-        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex, cfg = rt.store, rt.lex, rt.cfg
 
         def event_gen():
             for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus):
@@ -212,15 +230,15 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/term")
     def term(term: str = Query(..., min_length=1), limit: int = 8) -> dict:
-        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex, cfg = rt.store, rt.lex, rt.cfg
         res = term_lookup(store, lex, term, cfg, top_k=limit)
         return {
             "term": res["term"],
             "card": res["card"],
             "exact_total": res["exact_total"],
-            "exact_hits": [_chunk_json(c, lex) for c in res["exact_hits"]],
+            "exact_hits": [_chunk_json(c, lex, store) for c in res["exact_hits"]],
             "semantic_hits": [
-                {**_chunk_json(h["chunk"], lex), "score": round(h["score"], 6)}
+                {**_chunk_json(h["chunk"], lex, store), "score": round(h["score"], 6)}
                 for h in res["semantic_hits"]
             ],
         }
@@ -237,7 +255,7 @@ def create_app(cfg: dict) -> FastAPI:
         keyword: str | None = None,
         limit: int = 30,
     ) -> dict:
-        store, lex, cfg = _STATE["store"], _STATE["lex"], _STATE["cfg"]
+        store, lex = rt.store, rt.lex
         return quote_payload(
             store, lex, philosopher=philosopher, speaker=speaker, concept=concept,
             era=era, school=school, unit=unit, volume=volume,
@@ -249,13 +267,13 @@ def create_app(cfg: dict) -> FastAPI:
         """术语概念卡：定义句与出处 + 单元分布 + 共现理论家 + 相关引文。"""
         from .retrieve import build_concept_card
 
-        store, lex = _STATE["store"], _STATE["lex"]
+        store, lex = rt.store, rt.lex
         return build_concept_card(store, lex, term, limit)
 
     @app.get("/api/context")
     def context(chunk_id: str, window: int = 2) -> dict:
         """取某块及其前后各 window 块，用于界面上的「查看上下文」。"""
-        store, lex = _STATE["store"], _STATE["lex"]
+        store, lex = rt.store, rt.lex
         idx = next((i for i, c in enumerate(store.chunks) if c.chunk_id == chunk_id), None)
         if idx is None:
             raise HTTPException(404, f"chunk 不存在：{chunk_id}")
@@ -263,7 +281,7 @@ def create_app(cfg: dict) -> FastAPI:
         return {
             "focus": chunk_id,
             "items": [
-                {**_chunk_json(store.chunks[i], lex), "is_focus": i == idx}
+                {**_chunk_json(store.chunks[i], lex, store), "is_focus": i == idx}
                 for i in range(lo, hi)
             ],
         }
@@ -271,8 +289,8 @@ def create_app(cfg: dict) -> FastAPI:
     return app
 
 
-def _chunk_json(c, lex: Lexicon) -> dict:
-    doc_title = _STATE["store"].manifest.get("doc_title", "")
+def _chunk_json(c: Chunk, lex: Lexicon, store: Store) -> dict:
+    doc_title = store.manifest.get("doc_title", "")
     return {
         "chunk_id": c.chunk_id,
         "text": c.text,

@@ -34,7 +34,7 @@ def main():
         assert res["context"], f"{q} context is empty!"
         assert res["context_chars"] > 0, f"{q} context_chars is 0!"
         assert len(res["units"]) > 0, f"{q} no units!"
-        print(f"  [OK] context and units present")
+        print("  [OK] context and units present")
         print()
 
 

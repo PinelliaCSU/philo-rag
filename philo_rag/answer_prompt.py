@@ -241,6 +241,11 @@ def prompt_style(cfg: dict[str, Any]) -> str:
     return style
 
 
+def bridge_max(cfg: dict[str, Any]) -> int:
+    """quote_first 提示词里的衔接语剂量上限（answer.bridge_max_chars，默认 60 字）。"""
+    return int(((cfg or {}).get("answer", {}) or {}).get("bridge_max_chars", 60))
+
+
 def point_prompt(cfg: dict[str, Any]) -> str:
     return PROMPT_TEMPLATE_QUOTE_FIRST if prompt_style(cfg) == "quote_first" else PROMPT_TEMPLATE_LEGACY
 
