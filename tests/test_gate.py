@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from check_gate import CASES, RELEVANCE_CASES, combined_gate
+from scripts.check_gate import CASES, RELEVANCE_CASES, combined_gate
 
 from philo_rag.gate import check_question, skip_answer
 
