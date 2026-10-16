@@ -956,3 +956,236 @@ philosophers:
     death: 1961
     era: 20世纪
     school: 近代科学
+
+  # ---------- 补录（二）：语料挖掘新增（2026-10，全书频次取证）----------
+  # 来源：data/哲学大纲_规范化_全集.txt 全文扫描；注释内数字为该名全书实际出现次数。
+  # 收录标准：语料有据、且在书中被作为思想人物 / 理论代表讨论；生卒年为通行说法（约数标约）。
+  # 未收：字符串误配（如「米德」多为「阿基米德」、「莫斯」多为「莫斯科」、「维纳」多为「列维纳斯」）。
+
+  # ---- 古希腊 ----
+  - name: 泰勒斯
+    aliases: [Thales]
+    birth: -624
+    death: -546
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 阿那克西曼德
+    aliases: [Anaximander]
+    birth: -610
+    death: -546
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 阿那克西美尼
+    aliases: [Anaximenes]
+    birth: -586
+    death: -526
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 毕达哥拉斯
+    aliases: [Pythagoras]
+    birth: -570
+    death: -495
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 芝诺
+    aliases: [Zeno, 埃利亚的芝诺]          # 20 次；书中语境为埃利亚的芝诺
+    birth: -490
+    death: -430
+    era: 古希腊
+    school: 爱利亚学派
+  - name: 恩培多克勒
+    aliases: [Empedocles]
+    birth: -494
+    death: -434
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 德谟克利特
+    aliases: [Democritus]
+    birth: -460
+    death: -370
+    era: 古希腊
+    school: 古希腊哲学
+  - name: 普罗泰戈拉
+    aliases: [Protagoras, 普罗塔哥拉]
+    birth: -490
+    death: -420
+    era: 古希腊
+    school: 智者派
+  - name: 高尔吉亚
+    aliases: [Gorgias]
+    birth: -483
+    death: -375
+    era: 古希腊
+    school: 智者派
+
+  # ---- 晚期古代—近代早期 ----
+  - name: 德尔图良
+    aliases: [Tertullian, 特土良]
+    birth: 155
+    death: 240
+    era: 教父哲学
+    school: 教父哲学
+  - name: 埃克哈特
+    aliases: [Eckhart, 艾克哈特, 迈斯特·埃克哈特]
+    birth: 1260
+    death: 1328
+    era: 中世纪
+    school: 德意志神秘主义
+  - name: 库萨的尼古拉
+    aliases: [库萨, Nicholas of Cusa, 尼古拉·库萨]
+    birth: 1401
+    death: 1464
+    era: 近代早期
+    school: 文艺复兴哲学
+  - name: 布鲁诺
+    aliases: [Bruno, 乔尔丹诺·布鲁诺]
+    birth: 1548
+    death: 1600
+    era: 近代早期
+    school: 文艺复兴哲学
+  - name: 路德
+    aliases: [Luther, 马丁·路德]
+    birth: 1483
+    death: 1546
+    era: 近代早期
+    school: 宗教改革
+  - name: 伽森狄
+    aliases: [Gassendi, 皮埃尔·伽森狄, 伽桑狄]   # 57 次（另「伽桑狄」13 次）
+    birth: 1592
+    death: 1655
+    era: 近代早期
+    school: 经验主义
+  - name: 波义耳
+    aliases: [Boyle, 罗伯特·波义耳]
+    birth: 1627
+    death: 1691
+    era: 近代早期
+    school: 近代科学
+  - name: 沃尔夫
+    aliases: [Wolff, 克里斯蒂安·沃尔夫]        # 49 次；康德以其为独断论的代表
+    birth: 1679
+    death: 1754
+    era: 近代早期
+    school: 理性主义
+  - name: 萨德
+    aliases: [Sade, 萨德侯爵]
+    birth: 1740
+    death: 1814
+    era: 18世纪
+    school: 文学
+
+  # ---- 19 世纪 ----
+  - name: 爱默生
+    aliases: [Emerson, 拉尔夫·沃尔多·爱默生]
+    birth: 1803
+    death: 1882
+    era: 19世纪
+    school: 美国超验主义
+  - name: 陀思妥耶夫斯基
+    aliases: [Dostoevsky, 费奥多尔·陀思妥耶夫斯基]
+    birth: 1821
+    death: 1881
+    era: 19世纪
+    school: 俄罗斯文学
+  - name: 拉萨尔
+    aliases: [Lassalle]
+    birth: 1825
+    death: 1864
+    era: 19世纪
+    school: 社会主义
+  - name: 饶勒斯
+    aliases: [Jaurès, 让·饶勒斯]
+    birth: 1859
+    death: 1914
+    era: 19世纪
+    school: 社会主义
+  - name: 柯亨
+    aliases: [Cohen, 赫尔曼·柯亨]              # 29 次；马堡学派
+    birth: 1842
+    death: 1918
+    era: 19世纪
+    school: 新康德主义
+  - name: 舍斯托夫
+    aliases: [Shestov, 列夫·舍斯托夫]
+    birth: 1866
+    death: 1938
+    era: 20世纪
+    school: 存在主义先驱
+
+  # ---- 20 世纪 ----
+  - name: 欧根·芬克
+    aliases: [Eugen Fink, 芬克]                # 35 次
+    birth: 1905
+    death: 1975
+    era: 20世纪
+    school: 现象学
+  - name: 罗兰·巴特
+    aliases: [Barthes, Roland Barthes, 巴特]   # 36 次（书中「巴特」均指此人）
+    guard:
+      compounds: [巴特勒]                       # 「巴特勒」是另一位理论家，不能算「巴特」
+    birth: 1915
+    death: 1980
+    era: 20世纪
+    school: 结构主义
+  - name: 加缪
+    aliases: [Camus, 阿尔贝·加缪]
+    birth: 1913
+    death: 1960
+    era: 20世纪
+    school: 存在主义
+  - name: 卡夫卡
+    aliases: [Kafka, 弗兰茨·卡夫卡]
+    birth: 1883
+    death: 1924
+    era: 20世纪
+    school: 文学
+  - name: 博尔赫斯
+    aliases: [Borges, 豪尔赫·路易斯·博尔赫斯]
+    birth: 1899
+    death: 1986
+    era: 20世纪
+    school: 文学
+  - name: 古德曼
+    aliases: [Goodman, 纳尔逊·古德曼]
+    birth: 1906
+    death: 1998
+    era: 20世纪
+    school: 分析哲学
+
+  # ---- 中国与印度 ----
+  - name: 杨朱
+    aliases: [Yang Zhu]
+    birth: -450
+    death: -370
+    era: 战国
+    school: 道家
+  - name: 惠施
+    aliases: [Hui Shi]
+    birth: -370
+    death: -310
+    era: 战国
+    school: 名家
+  - name: 韩非
+    aliases: [Han Fei, 韩非子]
+    birth: -280
+    death: -233
+    era: 战国
+    school: 法家
+  - name: 乔达摩
+    aliases: [Gautama, 释迦牟尼, 佛陀, 乔达摩·悉达多]
+    birth: -563
+    death: -483
+    era: 古印度
+    school: 佛教
+  - name: 龙树
+    aliases: [Nāgārjuna, 龙树菩萨]
+    birth: 150
+    death: 250
+    era: 古印度
+    school: 中观派
+  - name: 达摩
+    aliases: [Bodhidharma, 菩提达摩]
+    guard:
+      compounds: [乔达摩]                       # 「达摩」是「乔达摩」的子串，须整体排除
+    era: 古印度
+    school: 禅宗

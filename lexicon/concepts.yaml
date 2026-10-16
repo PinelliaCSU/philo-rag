@@ -433,3 +433,338 @@ concepts:
     aliases: [良知, 知行合一]
     philosopher: 王阳明
     definition: 良知是心之本体，致良知即推致良知于事事物物，知行本为一体
+
+  # ====================== 八、语料挖掘补充（2026-10，全书频次取证）======================
+  # 来源：data/哲学大纲_规范化_全集.txt 全文扫描；注释内数字为该词全书实际出现次数。
+  # 收录标准：书中作为术语使用、有界说语境、频次 ≥ 6，且不与既有条目重复；
+  # 定义依据语料用法与通行哲学史写法，别名只收标准异写与外文名。
+  # 未收：① 过于日常的通用词（心 / 天 / 名 / 现象 / 结构 / 存在 等，标注它们等于给全库
+  # 贴同一张标签）；② 语料中查无实据者（如 心斋 / 五行——全书 0 次，不得凭通行哲学史补录）。
+
+  # ---- 精神分析（续）----
+  - name: 无意识
+    aliases: [unconscious, 潜意识]              # 346 次
+    philosopher: 弗洛伊德
+    definition: 不被意识所把握、却支配言行与症状的心理结构；拉康派把它读作符号系统自身的缺失与断裂
+  - name: 欲望
+    aliases: [desire]                            # 335 次
+    philosopher: 拉康
+    definition: 永远延异、无法被任何具体对象满足的匮乏；拉康派以需求—要求—欲望三分刻画它
+  - name: 认同
+    aliases: [identification]                    # 272 次
+    philosopher: 拉康
+    definition: 主体把自身与某个形象或位置相等同的机制；拉康派区分想象性认同与象征性认同
+  - name: 压抑
+    aliases: [repression]                        # 268 次
+    philosopher: 弗洛伊德
+    definition: 把不可接受的欲望或表象排除出意识的心理机制，被压抑者总是以症状形式回归
+  - name: 癔症
+    aliases: [hysteria]                          # 219 次
+    philosopher: 弗洛伊德
+    definition: 以身体症状与对他人欲望的质询为特征的精神结构；拉康四话语中的癔症话语由此得名
+  - name: 阉割
+    aliases: [castration]                        # 72 次
+    philosopher: 拉康
+    definition: 主体接受象征秩序（父之名）切割的机制；由此欲望被组织进符号交换
+  - name: 本我
+                                                 # 35 次
+    philosopher: 弗洛伊德
+    definition: 弗洛伊德结构模型中的原初欲望装置，与自我、超我并列
+  - name: 超我
+    aliases: [superego]                          # 31 次
+    philosopher: 弗洛伊德
+    definition: 弗洛伊德结构模型中的道德权威装置，以罪感与命令约束自我
+  - name: 神经症
+    aliases: [neurosis]                          # 30 次
+    philosopher: 弗洛伊德
+    definition: 以焦虑、防御与症状为表现的冲突性精神结构，与精神病、倒错并列
+  - name: 升华
+    aliases: [sublimation]                       # 27 次
+    philosopher: 弗洛伊德
+    definition: 把驱力从原始目标转向文化所认可目标的机制（如艺术与思辨）
+  - name: 偏执狂
+    aliases: [paranoia]                          # 22 次
+    philosopher: 弗洛伊德
+    definition: 以系统性妄想（如被迫害妄想）为特征的精神结构；弗洛伊德曾据以分析话语机制
+  - name: 强迫症
+    aliases: [obsessional neurosis]              # 20 次
+    philosopher: 弗洛伊德
+    definition: 以反复、仪式化行为与自我怀疑为特征的精神结构
+  - name: 移情
+    aliases: [transference, Übertragung]         # 13 次
+    philosopher: 弗洛伊德
+    definition: 把对早年对象的欲望与情感转移到分析者或他人身上的机制，是精神分析的核心工作材料
+  - name: 菲勒斯
+    aliases: [phallus]                           # 12 次
+    philosopher: 拉康
+    definition: 不是器官而是能指：欲望与匮乏的象征性标记，主体在它面前分化为有与无
+  - name: 前意识
+    aliases: [preconscious]                      # 11 次
+    philosopher: 弗洛伊德
+    definition: 介于意识与无意识之间、可被唤回的心理内容
+
+  # ---- 观念论与辩证法（续）----
+  - name: 否定性
+    aliases: [negativity]                        # 489 次
+    philosopher: 黑格尔
+    definition: 不可被既成秩序吸收的对抗维度；本书把主体性读作符号系统内在的否定性（不一致与张力）
+  - name: 矛盾
+    aliases: [contradiction]                     # 459 次
+    philosopher: 黑格尔
+    definition: 事物内部的对抗性张力；辩证法以对立双方的相互依赖与转化把握它，区别于形式逻辑的不矛盾律
+  - name: 必然性
+    aliases: [necessity]                         # 290 次
+    definition: 不以意愿为转移的规定性；本书常批判「把偶然必然化」——普遍主义即此机制
+  - name: 同一性
+    aliases: [identity]                          # 155 次
+    definition: 事物与自身相等同的规定性；也指自我跨时间保持为同一自我的设定
+  - name: 因果性
+    aliases: [causality]                         # 126 次
+    definition: 原因与结果之间的连结；休谟还原为习惯性联想，康德论证其为先验范畴
+  - name: 统觉
+    aliases: [apperception]                      # 32 次
+    philosopher: 康德
+    definition: 把一切表象归摄于「我思」的自我意识统一；先验统觉是知性运用的最高条件
+  - name: 现实性
+    aliases: [actuality]                         # 32 次
+    definition: 已实现的规定性；在黑格尔那里，现实是本质与实存的统一
+  - name: 判断力
+    aliases: [judgment]                          # 32 次
+    philosopher: 康德
+    definition: 把普遍与特殊联结起来的能力；反思性判断力（审美与目的论）是《判断力批判》的主题
+  - name: 义务
+    aliases: [duty, Pflicht]                     # 31 次
+    philosopher: 康德
+    definition: 出于法则而非偏好的应当；康德伦理学的基本概念
+  - name: 可能世界
+    aliases: [possible worlds]                   # 29 次
+    philosopher: 莱布尼茨
+    definition: 神在诸多可能世界中选择最好的一个使之现实化；模态语义学的基本设定
+  - name: 绝对自我
+    aliases: [absolute ego]                      # 12 次
+    philosopher: 费希特
+    definition: 设定自身与非我、充当全部知识学原理的绝对活动
+  - name: 潜能
+    aliases: [dynamis, potentiality]             # 9 次
+    philosopher: 亚里士多德
+    definition: 尚未实现而可实现的规定性，与「现实」相对
+  - name: 图式
+    aliases: [schema]                            # 8 次
+    philosopher: 康德
+    definition: 把范畴应用于直观的中介，是先验想象力的产物
+  - name: 道德律
+    aliases: [moral law]                         # 8 次
+    philosopher: 康德
+    definition: 理性的道德法则；其约束力来自意志的自律而非外部命令
+
+  # ---- 现象学与存在主义（续）----
+  - name: 实存
+    aliases: [existence]                         # 230 次
+    philosopher: 克尔凯郭尔
+    definition: 实际生存意义上的存在；克尔凯郭尔以审美、伦理、宗教三阶段刻画实存的运动
+  - name: 存在者
+    aliases: [beings]                            # 228 次
+    philosopher: 海德格尔
+    definition: 被存在所规定的具体存在物；「存在」与「存在者」的区分是存在论的基本问题
+  - name: 意向性
+    aliases: [intentionality, intention]         # 206 次
+    philosopher: 胡塞尔
+    definition: 意识总是「关于某物」的性质；胡塞尔以此作为现象学的出发点
+  - name: 主体间性
+    aliases: [intersubjectivity]                 # 175 次
+    definition: 主体之间相互承认与理解的结构；也指支撑客观性的共同视域
+  - name: 审美
+    aliases: [aesthetic]                         # 163 次
+    philosopher: 克尔凯郭尔
+    definition: 感受、趣味与判断力的维度；克尔凯郭尔把审美列为生存三阶段之一（无负担、无方向）
+  - name: 意向对象
+    aliases: [noema]                             # 28 次
+    philosopher: 胡塞尔
+    definition: 意向体验中所指向的对象极（noema），与意向行为相对
+  - name: 常人
+    aliases: [das Man]                           # 27 次
+    philosopher: 海德格尔
+    definition: 日常此在的存在方式由「他人」支配：人们怎样，我便怎样
+  - name: 本质直观
+    aliases: [eidetic intuition, Wesensschau]    # 23 次
+    philosopher: 胡塞尔
+    definition: 经现象学还原后，在想象变更中把握事物本质（eidos）的方法
+  - name: 沉沦
+    aliases: [Verfallen]                         # 22 次
+    philosopher: 海德格尔
+    definition: 此在从本真可能性滑落到常人世界的日常存在方式
+  - name: 上手
+    aliases: [Zuhandenheit]                      # 13 次
+    philosopher: 海德格尔
+    definition: 用具在使用中被照面的存在方式（上手状态），与「现成在手」相对
+  - name: 操心
+    aliases: [Sorge]                             # 12 次
+    philosopher: 海德格尔
+    definition: 此在存在方式的整体结构——被抛、筹划与沉沦的统一
+  - name: 意向行为
+    aliases: [noesis]                            # 12 次
+    philosopher: 胡塞尔
+    definition: 意向体验中指向对象的「行为」侧面（noesis），与意向对象相对
+  - name: 被抛
+    aliases: [Geworfenheit]                      # 11 次
+    philosopher: 海德格尔
+    definition: 此在不得不接受既有处境（被抛状态），与自由筹划相对
+
+  # ---- 结构主义 · 后结构主义（续）----
+  - name: 姿态
+                                                 # 780 次；本书核心语汇
+    definition: 一个体系对待存在者整体、他人与自身反思性的总体站位（如「哲学的姿态」「辩证唯物主义的姿态」）
+  - name: 事件
+    aliases: [event]                             # 326 次
+    philosopher: 巴迪欧
+    definition: 断裂性地打断既有秩序与因果链的突发之物；主体与真理在事件中开启
+  - name: 生成
+    aliases: [becoming]                          # 299 次
+    definition: 事物得以产生与变化的过程维度，与既成状态相对；也指客观时间的生成机制
+  - name: 重复
+    aliases: [repetition]                        # 223 次
+    definition: 同一结构在时间中的反复出现；弗洛伊德—拉康把「强迫性重复」视为主体的命运
+  - name: 规训
+    aliases: [discipline, regulation]            # 27 次
+    philosopher: 福柯
+    definition: 通过训练、检查与规范化把身体与行为纳入秩序的权力技术（社会规训）
+  - name: 知识型
+    aliases: [episteme]                          # 25 次
+    philosopher: 福柯
+    definition: 一个时代知识得以可能的底层配置；「知识考古学」以断裂眼光描述其更替
+  - name: 考古学
+    aliases: [archaeology]                       # 23 次
+    philosopher: 福柯
+    definition: 在档案层面描述话语规则之生成的方法，不追问起源与深意
+  - name: 文化资本
+    aliases: [cultural capital]                  # 7 次
+    philosopher: 布尔迪厄
+    definition: 以教育、品味与文化能力形式积累、可兑换为其他资本的符号性资本
+  - name: 主权
+    aliases: [sovereignty]                       # 7 次
+    definition: 对内最高、对外独立的统治权；本书也用于金融与经济主权的讨论
+  - name: 元语言
+    aliases: [metalanguage]                      # 8 次
+    definition: 用来谈论对象语言的更高一层语言；本书以它指占据至高解释位置的话语权
+
+  # ---- 马克思主义与政治哲学（续）----
+  - name: 阶级
+    aliases: [社会阶级]                          # 228 次
+    philosopher: 马克思
+    definition: 由在生产关系中的位置划分的社会集团，马克思主义政治分析的基本单位
+  - name: 权力
+    aliases: [power]                             # 224 次
+    philosopher: 福柯
+    definition: 在关系中支配行动、塑造可能性空间的力量；福柯把它理解为弥散于社会关系的生产性机制
+  - name: 再生产
+    aliases: [reproduction]                      # 163 次
+    philosopher: 马克思
+    definition: 既有社会关系、阶级结构与生产条件在时间中被不断重新生产出来的过程
+  - name: 劳动
+    aliases: [labor]                             # 133 次
+    philosopher: 马克思
+    definition: 人改造自然以满足需要的活动；马克思主义以劳动为价值、分工与异化分析的核心
+  - name: 生产关系
+    aliases: [relations of production]           # 127 次
+    philosopher: 马克思
+    definition: 人们在生产中形成的、与生产力相适应的相互关系
+  - name: 正义
+    aliases: [justice]                           # 106 次
+    definition: 何为正当、何为应得的规定；本书指出它常由符号学律令体系（而非自然）设定
+  - name: 辩证唯物主义
+    aliases: [dialectical materialism]           # 52 次
+    definition: 四字头「实践」的哲学全称：坚持总体与总体化之差异，并随时对哲学姿态保持警惕
+  - name: 市民社会
+    aliases: [civil society]                     # 27 次
+    philosopher: 黑格尔
+    definition: 由需要与交换联结起来、相对国家而言的社会领域
+  - name: 功利主义
+    aliases: [utilitarianism]                    # 25 次
+    definition: 以最大幸福或最大效用为道德标准的伦理学；幸福被还原为可计量的快乐
+  - name: 公平
+    aliases: [fairness]                          # 25 次
+    definition: 分配与交换中的对等要求；本书指出「公平」常是被架空的普遍性许诺
+  - name: 阶级斗争
+    aliases: [class struggle]                    # 20 次
+    philosopher: 马克思
+    definition: 阶级之间围绕统治与解放的对抗，被理解为历史运动的核心张力
+  - name: 领导权
+    aliases: [hegemony, 文化霸权]                # 13 次
+    philosopher: 葛兰西
+    definition: 通过文化、教育与意识形态斗争赢得的支配性共识，须在阵地战中争夺
+  - name: 有机知识分子
+    aliases: [organic intellectual]              # 9 次
+    philosopher: 葛兰西
+    definition: 与所属阶级有机相连、在阵地战中争夺领导权的知识分子
+
+  # ---- 科学哲学与认识论（续）----
+  - name: 范式
+    aliases: [paradigm]                          # 216 次
+    philosopher: 库恩
+    definition: 科学共同体共有的信念、方法与范例的总合；常规科学在其内解题，危机导致范式更替
+  - name: 私人语言
+    aliases: [private language]                  # 22 次
+    philosopher: 维特根斯坦
+    definition: 只有说话者本人能理解的语言不可能存在——语言的规则性要求公共性
+  - name: 科学革命
+    aliases: [scientific revolution]             # 22 次
+    philosopher: 库恩
+    definition: 常规科学陷入危机后，范式整体更替的断裂事件
+  - name: 理论实践
+    aliases: [theoretical practice]              # 15 次
+    philosopher: 阿尔都塞
+    definition: 以理论为对象的生产活动，与意识形态实践相区分
+  - name: 不可通约性
+    aliases: [incommensurability]                # 14 次
+    philosopher: 库恩
+    definition: 不同范式之间无法用同一尺度相互比较的性质
+  - name: 认识论断裂
+    aliases: [epistemological break]             # 9 次
+    philosopher: 阿尔都塞
+    definition: 意识形态与科学之间的决裂；科学在断裂中诞生，并不断回溯地重划自身
+  - name: 症候阅读
+    aliases: [symptomatic reading]               # 7 次
+    philosopher: 阿尔都塞
+    definition: 从文本的沉默、断裂与症候中读出未被说出的问题式
+  - name: 问题式
+    aliases: [problematic]                       # 6 次
+    philosopher: 阿尔都塞
+    definition: 决定一个文本能提出哪些问题的总框架；意识形态的问题式遮蔽真实问题
+
+  # ---- 古典哲学概念（续）----
+  - name: 本原
+    aliases: [始基]                              # 9 次
+    philosopher: 泰勒斯
+    definition: 万物由以生成并复归于其的根据；米利都学派追问的「本原问题」即始基问题
+
+  # ---- 中国与印度（续）----
+  - name: 天命
+    aliases: [Mandate of Heaven]                 # 55 次
+    definition: 天所赋予的使命与命运；本书指出它实为共同体的符号学实践（唯物主义读法）
+  - name: 阴阳
+    aliases: [yin-yang]                          # 19 次
+    definition: 以阴、阳两种相对力量的相生相待解释万物变化的结构；与《易》及道家体系相联
+  - name: 至人
+                                                 # 13 次
+    philosopher: 庄子
+    definition: 与天同寿、长存久世的人格理想；仍是生物性的人类，与「真人」相区别
+  - name: 坐忘
+                                                 # 10 次
+    philosopher: 庄子
+    definition: 把内卷出来的多余内部空间去掉的还原操作——一种拍平、降阶
+  - name: 真人
+                                                 # 9 次
+    philosopher: 庄子
+    definition: 剥除文明辞饰、与道合一的人格理想
+  - name: 缘起
+    aliases: [pratītyasamutpāda, dependent origination]   # 14 次
+    definition: 一切事物依因待缘而生、无独立自性；十二缘起说明轮回的因果链
+  - name: 涅槃
+    aliases: [nirvana]                           # 14 次
+    definition: 超越生灭二元（既非 being 亦非 non-being）的解脱境地
+  - name: 唯识
+    aliases: [vijñānavāda, 唯识宗]               # 19 次
+    definition: 佛教唯识学：万法唯识所现，以八识（含阿赖耶识、末那识）解析认识与存在
+  - name: 阿赖耶识
+    aliases: [ālaya-vijñāna, 藏识]               # 19 次
+    definition: 唯识学第八识：含藏一切种子、为万法所依；与先验主体性有近似结构
