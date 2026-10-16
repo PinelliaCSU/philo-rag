@@ -574,10 +574,12 @@ def glossary_payload(store: Store, lex: Lexicon) -> dict[str, Any]:
 # 概念卡构建：/api/concept 数据源
 # --------------------------------------------------------------------------- #
 def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) -> dict[str, Any]:
-    """术语概念卡：定义句与出处 + 单元分布 + 共现理论家 + 相关引文。
+    """术语概念卡：定义句与出处 + 单元分布 + 共现理论家 + 相关概念 + 所属主题 + 引文。
 
     只读 store 与 lex，不走向量检索。定义句来自正文块（含「X 是/即/意味着」
     定义句式），单元/理论家统计来自块元数据与正文命中，引文来自 quote 块。
+    候选块走「注解倒排 ∪ 字面倒排」的候选集（ASCII 词面自动回退全库扫描），
+    因此不再对全部块逐个做正则匹配（见 `_candidate_indices`）。
     """
     limit = max(0, min(int(limit), 20))
     card = lex.concept_card(term)
@@ -589,6 +591,8 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
             "definition": None,
             "units": [],
             "philosophers": [],
+            "related": [],
+            "themes": [],
             "quotes": [],
         }
 
@@ -647,6 +651,7 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
         code = defn.unit_code()
         title = lex.unit_title(code, defn.chapter_path)
         definition = {
+            "chunk_id": defn.chunk_id,
             "text": defn.text,
             "unit": code,
             "unit_title": title,
@@ -681,12 +686,27 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
     quote_chunks.sort(key=lambda c: c.seq)
     quotes = [
         {
+            "chunk_id": c.chunk_id,
             "text": c.text,
             "speaker": c.speaker or "未署名",
             "unit": c.unit_code(),
             "citation": cite(c.unit_code(), lex.unit_title(c.unit_code(), c.chapter_path), int(c.page or 0)),
         }
         for c in quote_chunks[:limit]
+    ]
+
+    # 相关概念：与术语在同一块内共现的**精确注解**（不含别名与自身），按共现次数排序。
+    # 只统计块级 concepts（精确命中），不用 section_concepts（推断注解），
+    # 避免把「同一节顺带提到」当成概念关联。
+    related_counts: dict[str, int] = {}
+    skip = set(names) | {std}
+    for c in hits:
+        for other in c.concepts:
+            if other not in skip:
+                related_counts[other] = related_counts.get(other, 0) + 1
+    related = [
+        {"name": name, "count": int(count)}
+        for name, count in sorted(related_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
     ]
 
     return {
@@ -696,5 +716,8 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
         "definition": definition,
         "units": units,
         "philosophers": philosophers,
+        "related": related,
+        "themes": [str(t.get("name", "")) for t in lex.themes
+                   if std in (t.get("concepts") or [])],
         "quotes": quotes,
     }

@@ -16,6 +16,7 @@
   <button type="button" class="tab" data-p="concept" aria-pressed="false">概念卡</button>
   <button type="button" class="tab" data-p="search" aria-pressed="false">术语 / 引文检索</button>
   <button type="button" class="tab" data-p="map" aria-pressed="false">体系地图</button>
+  <button type="button" class="tab" data-p="notes" aria-pressed="false">笔记</button>
 </nav>
 
 <main>
@@ -106,6 +107,19 @@
       <!-- 面板三：体系地图 -->
       <section class="panel-pane" id="pane-map">
         <div class="map-body" id="map-out"></div>
+      </section>
+
+      <!-- 面板四：笔记与书签（只存浏览器本地，不上传、不写库） -->
+      <section class="panel-pane" id="pane-notes">
+        <div class="notes-top">
+          <div class="muted">收藏与批注保存在浏览器本地（localStorage），不上传、不写库；
+            在引用卡或单元面板的原文块上点「☆ 收藏」即可加入，导出 Markdown 后可自行归档。</div>
+          <div class="row">
+            <button id="notes-export" class="ghost">导出 Markdown</button>
+            <button id="notes-clear" class="ghost">清空</button>
+          </div>
+        </div>
+        <div id="notes-out"></div>
       </section>
 
     </div>

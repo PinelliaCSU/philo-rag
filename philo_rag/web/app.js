@@ -191,6 +191,9 @@ const state = {
   searchPage: 0,
   facets: null,
   units: [],
+  unitDetail: null,      // 当前打开的单元导览 {code, items, page, raw}
+  notes: [],             // 本地书签与批注（init 时从 localStorage 读入）
+  chunkCache: new Map(), // chunk_id → 可收藏的块信息（引用卡 / 概念卡 / 单元块列表写入）
 };
 const CITE_PER_PAGE = 1;   // 引用来源：逐条浏览
 const LIST_PER_PAGE = 4;   // 检索结果：每页 4 条
@@ -228,7 +231,7 @@ function setStrategy(s) {
 /* ------------------------------ 视图与面板 ------------------------------
    主视图只有一个（溯源回答，永远可见）。检索 / 体系地图 / 概念卡改成
    从右侧面板召唤，用 openPanel() 切换面板内容，closePanel() 回到主视图。 */
-const PANEL_TITLES = { concept: '概念卡', search: '术语 / 引文检索', map: '体系地图' };
+const PANEL_TITLES = { concept: '概念卡', search: '术语 / 引文检索', map: '体系地图', notes: '笔记与书签' };
 
 function closePanel() {
   $('#panel').classList.remove('open');
@@ -249,6 +252,7 @@ function openPanel(kind) {
     t.setAttribute('aria-pressed', String(selected));
   });
   if (kind === 'map' && state.units.length) renderSystemMap();
+  if (kind === 'notes') renderNotes();
   if (kind === 'concept') {
     const q = $('#concept-q');
     if (q && !q.value) q.focus();
@@ -331,6 +335,7 @@ function citeCard(c) {
     <div class="foot">
       <button class="ghost cite-toggle" data-toggle="${esc(n)}">${truncated ? '展开全文' : '收起'}</button>
       <button class="ghost" data-ctx="${esc(c.chunk_id)}">查看上下文</button>
+      <button class="ghost" data-bookmark="${esc(c.chunk_id)}">☆ 收藏</button>
       <span class="muted cite-expand-err" hidden></span>
     </div>
   </div>`;
@@ -347,10 +352,20 @@ function renderCitations(r) {
   const pages = Math.max(1, Math.ceil(list.length / CITE_PER_PAGE));
   const p = Math.min(state.citePage, pages - 1);
   state.citePage = p;
-  pane.innerHTML = list.slice(p * CITE_PER_PAGE, p * CITE_PER_PAGE + CITE_PER_PAGE).map(citeCard).join('');
+  const slice = list.slice(p * CITE_PER_PAGE, p * CITE_PER_PAGE + CITE_PER_PAGE);
+  slice.forEach(c => {
+    if (c.chunk_id) {
+      state.chunkCache.set(c.chunk_id, {
+        chunk_id: c.chunk_id, citation: c.citation, unit: c.unit,
+        unit_title: c.unit_title, text: c.text,
+      });
+    }
+  });
+  pane.innerHTML = slice.map(citeCard).join('');
   pane.scrollTop = 0;
   pager.innerHTML = pagerHTML(list.length, p, CITE_PER_PAGE);
   wirePager(pager, list.length, p, CITE_PER_PAGE, n => { state.citePage = n; renderCitations(r); });
+  syncBookmarkButtons();
 }
 
 /* 点回答正文里的引用标记：收起面板 → 切到对应页 → 滚动到卡片 → flash 高亮 */
@@ -772,10 +787,12 @@ async function runQuote() {
 
 /* ------------------------------ 概念卡侧栏 ------------------------------
    纯渲染函数 renderConceptCard(r)：不触碰 DOM，便于单测。
-   /api/concept 契约：{term, aliases[], found, definition{text, unit,
-   unit_title, page, char_span, citation, chunk_id?}, units[{code,title,hits}],
-   philosophers[{name,count}], quotes[{text,speaker,unit,citation}]}。
-   防御性处理：found=false、请求失败、404 一律显示「未收录或服务不可用」。 */
+   /api/concept 契约：{term, aliases[], found, definition{text, unit, unit_title,
+   page, char_span, citation, chunk_id}, units[{code,title,hits}],
+   philosophers[{name,count}], related[{name,count}], themes[name],
+   quotes[{chunk_id,text,speaker,unit,citation}]}。
+   防御性处理：found=false、请求失败、404 一律显示「未收录或服务不可用」。
+   「相关概念」「所属主题」是可点击的导航入口：前者翻到对应概念卡，后者直接发起范围查询。 */
 function renderConceptCard(r) {
   if (!r || !r.found) {
     return '<div class="card muted">未收录或服务不可用。</div>';
@@ -803,17 +820,38 @@ function renderConceptCard(r) {
   const phils = (r.philosophers || []).map(p =>
     `<span class="tag">${esc(p.name)} <span class="muted">${p.count}</span></span>`).join('');
 
-  const quotes = (r.quotes || []).map(q =>
-    `<div class="quote">「${esc(q.text)}」
+  const related = (r.related || []).map(x =>
+    `<button type="button" class="chip related-chip" data-concept="${esc(x.name)}">
+       <span>${esc(x.name)}</span><b>${x.count}</b>
+     </button>`).join('');
+
+  const themes = (r.themes || []).map(t =>
+    `<button type="button" class="chip theme-chip"
+             data-ask="${esc(t)}在体系中的位置" data-ask-strategy="theme">
+       <span>主题：${esc(t)}</span>
+     </button>`).join('');
+
+  const quotes = (r.quotes || []).map(q => {
+    const acts = [
+      q.chunk_id ? `<button class="ghost" data-ctx="${esc(q.chunk_id)}">查看上下文</button>` : '',
+      q.chunk_id ? `<button class="ghost" data-bookmark="${esc(q.chunk_id)}">☆ 收藏</button>` : '',
+    ].filter(Boolean).join(' ');
+    return `<div class="quote">「${esc(q.text)}」
        <div class="meta muted quote-meta">—— ${esc(q.speaker || '未署名')}　
          <span class="unit">${esc(q.unit || '—')}</span><br>${esc(q.citation || '')}</div>
-     </div>`).join('');
+       ${acts ? `<div class="foot">${acts}</div>` : ''}
+     </div>`;
+  }).join('');
 
   return `<div class="concept-card">
     <div class="card concept-hero">
       <div class="muted">术语词典</div>
       <h2>${esc(r.term)}</h2>
       ${aliases.length ? `<div class="muted">别名：${esc(aliases.join('、'))}</div>` : ''}
+      <div class="term-actions">
+        <button class="ghost" data-ask="什么是${esc(r.term)}？" data-ask-strategy="point">问：什么是${esc(r.term)}？</button>
+        <button class="ghost" data-ask="${esc(r.term)}在体系中的位置" data-ask-strategy="theme">${esc(r.term)}在体系中的位置</button>
+      </div>
     </div>
     <div class="card">
       <h3>定义</h3>
@@ -822,6 +860,10 @@ function renderConceptCard(r) {
     </div>
     ${units ? `<div class="card"><h3>单元分布</h3><div class="grid concept-grid">${units}</div></div>` : ''}
     ${phils ? `<div class="card"><h3>哲学家谱系</h3><div class="concept-lineage">${phils}</div></div>` : ''}
+    ${related ? `<div class="card"><h3>相关概念 <span class="muted heading-note">· 同块共现</span></h3>
+      <div class="grid concept-grid">${related}</div>
+      <div class="muted heading-note">按「与该概念出现在同一块」的次数排序，点击进入对应概念卡。</div></div>` : ''}
+    ${themes ? `<div class="card"><h3>所属主题</h3><div class="concept-lineage">${themes}</div></div>` : ''}
     ${quotes ? `<div class="card"><h3>引文</h3>${quotes}</div>` : ''}
   </div>`;
 }
@@ -834,10 +876,32 @@ async function loadConcept(term) {
   out.innerHTML = '<div class="muted">加载中…</div>';
   try {
     const r = await jget('/api/concept?term=' + encodeURIComponent(t) + '&limit=8');
+    rememberConceptChunks(r);
     out.innerHTML = renderConceptCard(r);
+    syncBookmarkButtons();
   } catch (e) {
     out.innerHTML = '<div class="card muted">未收录或服务不可用。</div>';
   }
+}
+
+/* 把概念卡里的定义块与引文块登记进 chunk 缓存：收藏按钮只需要 chunk_id，
+   取文案时从这里查（避免把长文本塞进 data-* 属性）。 */
+function rememberConceptChunks(r) {
+  const def = r.definition;
+  if (def && def.chunk_id) {
+    state.chunkCache.set(def.chunk_id, {
+      chunk_id: def.chunk_id, citation: def.citation, unit: def.unit,
+      unit_title: def.unit_title, text: def.text,
+    });
+  }
+  (r.quotes || []).forEach(q => {
+    if (q.chunk_id) {
+      state.chunkCache.set(q.chunk_id, {
+        chunk_id: q.chunk_id, citation: q.citation, unit: q.unit,
+        unit_title: '', text: q.text,
+      });
+    }
+  });
 }
 
 function openConcept(term) {
@@ -921,7 +985,78 @@ function renderSystemMap() {
   $('#map-out').innerHTML = h;
 }
 
-function selectMapUnit(code) {
+/* 单元导览：先渲染已知元信息，再拉 /api/unit 补内容（块列表 / 术语 / 理论家 / 子单元）。
+   块列表按阅读顺序分页，每块都能「查看上下文」或收藏；子单元可继续点进去。 */
+const UNIT_PER_PAGE = 6;
+
+function blockItem(c) {
+  const head = c.unit ? `<span class="unit">${esc(c.unit)}</span> ${esc(c.unit_title || '')}` : '';
+  const body = String(c.text || '');
+  const shown = body.length > 400 ? body.slice(0, 400) + '…' : body;
+  return `<div class="block-item">
+    <div class="meta muted">${head} ${esc(c.citation || '')}</div>
+    <div class="body block-text">${esc(shown)}</div>
+    <div class="foot">
+      <button class="ghost" data-ctx="${esc(c.chunk_id)}">查看上下文</button>
+      <button class="ghost" data-bookmark="${esc(c.chunk_id)}">☆ 收藏</button>
+    </div>
+  </div>`;
+}
+
+function rememberUnitChunks(items) {
+  (items || []).forEach(c => {
+    if (c.chunk_id) {
+      state.chunkCache.set(c.chunk_id, {
+        chunk_id: c.chunk_id, citation: c.citation, unit: c.unit,
+        unit_title: c.unit_title, text: c.text,
+      });
+    }
+  });
+}
+
+function renderUnitDetail(r) {
+  const box = $('#map-detail');
+  if (!box) return;
+  const detail = state.unitDetail || { code: r.code, items: [], page: 0 };
+  const items = detail.items || [];
+  const pages = Math.max(1, Math.ceil(items.length / UNIT_PER_PAGE));
+  const page = Math.min(detail.page || 0, pages - 1);
+  detail.page = page;
+
+  const h = headIndex(r.code);
+  const children = (r.children || []).map(c =>
+    `<button type="button" class="chip map-unit" data-map-code="${esc(c.code)}">
+       <span class="unit">${esc(c.code)}</span><span>${esc(c.title || '')}</span>
+     </button>`).join('');
+  const concepts = (r.concepts || []).map(x =>
+    `<button type="button" class="chip related-chip" data-concept="${esc(x.name)}">
+       <span>${esc(x.name)}</span><b>${x.count}</b></button>`).join('');
+  const phils = (r.philosophers || []).map(p =>
+    `<span class="tag">${esc(p.name)} <span class="muted">${p.count}</span></span>`).join('');
+
+  const slice = items.slice(page * UNIT_PER_PAGE, page * UNIT_PER_PAGE + UNIT_PER_PAGE);
+  rememberUnitChunks(slice);
+
+  box.innerHTML = `<div class="row map-detail-head"><h3>${esc(r.code)} ${esc(r.title || '')}</h3></div>
+    <div class="muted">卷：${esc(r.volume || '—')}　字头：${esc(HEAD_NAMES[String(r.code).split('-')[0]] || '—')}
+      　位面：${esc(LAYER_NAMES[(Number(r.depth) || 1) - 1] || '—')}
+      　块：<b>${r.counts ? r.counts.chunks : items.length}</b>（引文 ${r.counts ? r.counts.quotes : 0}）</div>
+    <div class="term-actions"><button class="ghost" data-unit-ask="${esc(r.code)}">用该单元提问</button></div>
+    ${children ? `<h4>子单元</h4><div class="grid concept-grid">${children}</div>` : ''}
+    ${concepts ? `<h4>本单元术语 <span class="muted heading-note">· 命中块数</span></h4>
+      <div class="grid concept-grid">${concepts}</div>` : ''}
+    ${phils ? `<h4>本单元理论家</h4><div class="concept-lineage">${phils}</div>` : ''}
+    <h4>原文块 <span class="muted heading-note">· 按阅读顺序</span></h4>
+    <div class="unit-blocks">${slice.map(blockItem).join('') || '<div class="muted">该单元没有索引块。</div>'}</div>
+    <div class="pager-row" id="unit-pager">${pagerHTML(items.length, page, UNIT_PER_PAGE)}</div>`;
+  wirePager($('#unit-pager'), items.length, page, UNIT_PER_PAGE, n => {
+    detail.page = n;
+    renderUnitDetail(r);
+  });
+  syncBookmarkButtons();
+}
+
+async function selectMapUnit(code) {
   const box = $('#map-detail');
   if (!box) return;
   if (!state.units.length) {
@@ -929,15 +1064,140 @@ function selectMapUnit(code) {
     return;
   }
   const u = state.units.find(x => String(x.code) === String(code));
-  if (!u) {
-    box.innerHTML = `<div class="muted">未找到单元 ${esc(code)}。</div>`;
+  const h = headIndex(code);
+  const l = layerIndex(u || { code });
+  box.innerHTML = `<div class="row map-detail-head"><h3>${esc(code)} ${esc((u && u.title) || '')}</h3></div>
+    <div class="muted">卷：${esc((u && u.volume) || '—')}　字头：${esc(HEAD_NAMES[h] || '—')}　位面：${esc(LAYER_NAMES[l - 1] || '—')}</div>
+    <div class="muted">加载单元内容…</div>`;
+  try {
+    const r = await jget('/api/unit?code=' + encodeURIComponent(code) + '&limit=200');
+    state.unitDetail = { code: r.code, items: r.items || [], page: 0, raw: r };
+    renderUnitDetail(r);
+  } catch (e) {
+    box.innerHTML = `<div class="muted">单元内容加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+/* ------------------------------ 本地笔记 / 书签 ------------------------------
+   只存浏览器 localStorage（不上传、不写库）：每条 = 块坐标 + 引用文案 + 原文摘录
+   + 自己的批注。用于把阅读中的发现固定下来；导出 Markdown 后可自行归档。
+   收藏入口统一走 [data-bookmark="chunk_id"]，文案由 syncBookmarkButtons() 就地刷新。 */
+const NOTES_KEY = 'philo-notes-v1';
+
+function loadNotes() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(NOTES_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter(n => n && n.chunk_id) : [];
+  } catch { return []; }
+}
+
+function saveNotes(list) {
+  state.notes = list;
+  try {
+    localStorage.setItem(NOTES_KEY, JSON.stringify(list));
+  } catch { /* 隐私模式 / 配额不足：静默忽略，界面仍可用 */ }
+}
+
+function noteIndex(chunkId) {
+  return state.notes.findIndex(n => n.chunk_id === chunkId);
+}
+
+function bookmarkLabel(on) {
+  return on ? '★ 已收藏' : '☆ 收藏';
+}
+
+/* 就地同步所有收藏按钮（引用卡 / 概念卡 / 单元块列表可能同时持有同一块） */
+function syncBookmarkButtons(chunkId) {
+  const sel = chunkId ? `[data-bookmark="${CSS.escape(chunkId)}"]` : '[data-bookmark]';
+  document.querySelectorAll(sel).forEach(b => {
+    const on = noteIndex(b.dataset.bookmark) !== -1;
+    b.textContent = bookmarkLabel(on);
+    b.classList.toggle('on', on);
+  });
+}
+
+function toggleBookmark(chunkId) {
+  if (!chunkId) return;
+  const i = noteIndex(chunkId);
+  if (i === -1) {
+    const src = state.chunkCache.get(chunkId) || { chunk_id: chunkId };
+    state.notes.push({
+      chunk_id: chunkId,
+      citation: src.citation || '',
+      unit: src.unit || '',
+      unit_title: src.unit_title || '',
+      text: String(src.text || '').slice(0, 300),
+      note: '',
+      ts: Date.now(),
+    });
+  } else {
+    state.notes = state.notes.filter(n => n.chunk_id !== chunkId);
+  }
+  saveNotes(state.notes);
+  syncBookmarkButtons(chunkId);
+  if ($('#pane-notes').classList.contains('on')) renderNotes();
+}
+
+function removeNote(chunkId) {
+  state.notes = state.notes.filter(n => n.chunk_id !== chunkId);
+  saveNotes(state.notes);
+  syncBookmarkButtons(chunkId);
+  renderNotes();
+}
+
+function renderNotes() {
+  const out = $('#notes-out');
+  if (!out) return;
+  const list = state.notes;
+  if (!list.length) {
+    out.innerHTML = '<div class="card muted">还没有收藏。回答的引用卡、概念卡的引文、' +
+      '单元面板的原文块上都有「☆ 收藏」，点一下即可固定一条。</div>';
     return;
   }
-  const h = headIndex(u.code);
-  const l = layerIndex(u);   // 传单元对象：传 code 会退化成「场域论」
-  box.innerHTML = `<div class="row map-detail-head"><h3>${esc(u.code)} ${esc(u.title || '')}</h3></div>
-    <div class="muted">卷：${esc(u.volume || '—')}　字头：${esc(HEAD_NAMES[h] || '—')}　位面：${esc(LAYER_NAMES[l - 1] || '—')}</div>
-    <div class="term-actions"><button class="ghost" data-unit-ask="${esc(u.code)}">用该单元提问</button></div>`;
+  out.innerHTML = list.map((n, i) => {
+    const head = n.unit ? `${esc(n.unit)} ${esc(n.unit_title || '')}` : '（未标注单元）';
+    return `<div class="card note-item">
+      <div class="meta muted">${head}　${esc(n.citation || n.chunk_id)}</div>
+      <div class="body note-excerpt">${esc(n.text || '')}</div>
+      <textarea class="note-edit" data-note-index="${i}" placeholder="写点批注…">${esc(n.note || '')}</textarea>
+      <div class="foot">
+        <button class="ghost" data-ctx="${esc(n.chunk_id)}">查看上下文</button>
+        <button class="ghost" data-note-remove="${esc(n.chunk_id)}">☆ 移除</button>
+      </div>
+    </div>`;
+  }).join('');
+  out.querySelectorAll('.note-edit').forEach(t => {
+    t.onchange = () => {
+      const i = Number(t.dataset.noteIndex);
+      if (state.notes[i]) {
+        state.notes[i].note = t.value;
+        saveNotes(state.notes);
+      }
+    };
+  });
+}
+
+function exportNotes() {
+  if (!state.notes.length) return;
+  const lines = ['# 阅读笔记 · 《哲学大纲》', ''];
+  state.notes.forEach((n, i) => {
+    lines.push(`## ${i + 1}. ${n.unit ? n.unit + ' ' + (n.unit_title || '') : '（未标注单元）'}`);
+    lines.push('');
+    lines.push('> ' + String(n.text || '').replace(/\n/g, ' '));
+    lines.push('');
+    lines.push(`出处：${n.citation || n.chunk_id}`);
+    if (n.note) {
+      lines.push('');
+      lines.push(`批注：${n.note}`);
+    }
+    lines.push('');
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '哲学大纲-阅读笔记.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ------------------------------ 原文上下文 ------------------------------ */
@@ -995,6 +1255,14 @@ document.addEventListener('click', e => {
   if (term) { openConcept(term.dataset.term); return; }
   const tgl = e.target.closest('.cite-toggle');
   if (tgl) { toggleCite(tgl); return; }
+  const bm = e.target.closest('[data-bookmark]');
+  if (bm) { toggleBookmark(bm.dataset.bookmark); return; }
+  const rm = e.target.closest('[data-note-remove]');
+  if (rm) { removeNote(rm.dataset.noteRemove); return; }
+  const cpt = e.target.closest('[data-concept]');
+  if (cpt) { openConcept(cpt.dataset.concept); return; }
+  const aq = e.target.closest('[data-ask]');
+  if (aq) { askQuestion(aq.dataset.ask, aq.dataset.askStrategy || 'auto'); return; }
   const ctx = e.target.closest('[data-ctx]');
   if (ctx) { openContext(ctx.dataset.ctx); return; }
   const mu = e.target.closest('[data-map-unit]');
@@ -1049,6 +1317,16 @@ document.addEventListener('keydown', e => {
 (async function init() {
   setStrategy('auto');
   buildSearchForm();
+  state.notes = loadNotes();
+
+  $('#notes-export').onclick = () => exportNotes();
+  $('#notes-clear').onclick = () => {
+    if (!state.notes.length) return;
+    if (!window.confirm(`确定清空 ${state.notes.length} 条书签与批注？此操作不可撤销。`)) return;
+    saveNotes([]);
+    renderNotes();
+    syncBookmarkButtons();
+  };
 
   try {
     const [f, u] = await Promise.all([jget('/api/facets'), jget('/api/units')]);
