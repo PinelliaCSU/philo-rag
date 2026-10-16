@@ -297,6 +297,50 @@ def hybrid_search(
 
 
 # --------------------------------------------------------------------------- #
+# 术语解析与命中候选（/api/term 与 /api/concept 共用）
+# --------------------------------------------------------------------------- #
+def _term_names(lex: Lexicon, term: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """术语 → (词典卡, 全部等价名)：标准名 + 别名 + 查询串本身，供命中判定共用。"""
+    card = lex.concept_card(term)
+    if not card:
+        return None, [term]
+    names = [card["name"], *card.get("aliases", []), term]
+    return card, list(dict.fromkeys(n for n in names if n))
+
+
+def _tagged_ids(store: Store, names: list[str]) -> set[str]:
+    """按「概念 / 理论家 / 单元」三张倒排表取并集（元数据命中，证据最硬）。"""
+    ids: set[str] = set()
+    for name in names:
+        ids |= set(store.terms["concept"].get(name, []))
+        ids |= set(store.terms["philosopher"].get(name, []))
+        ids |= set(store.terms["unit"].get(name, []))
+    return ids
+
+
+def _text_has(text: str, name: str) -> bool:
+    """词面命中：中文按子串；含 ASCII 字母时按大小写不敏感比较。"""
+    if name in text:
+        return True
+    if any(ch.isascii() and ch.isalpha() for ch in name):
+        return name.lower() in text.lower()
+    return False
+
+
+def _candidate_indices(store: Store, ids: set[str], names: list[str]) -> list[int] | None:
+    """候选块下标（注解命中 ∪ 字面命中候选，前者精确、后者为超集）。
+
+    返回 None 表示不能用候选集安全替代全库扫描（词面含 ASCII 字母，大小写不敏感
+    匹配无法用字符倒排表达），调用方应退回遍历全库——保证结果与旧实现一致。
+    """
+    if any(any(ch.isascii() and ch.isalpha() for ch in n) for n in names):
+        return None
+    cands = {i for i in (store.index_of(cid) for cid in ids) if i is not None}
+    cands |= store.literal_candidates(names)
+    return sorted(cands)
+
+
+# --------------------------------------------------------------------------- #
 # 入口二：术语索引与语义检索
 # --------------------------------------------------------------------------- #
 def term_lookup(
@@ -307,19 +351,11 @@ def term_lookup(
     top_k: int = 8,
 ) -> dict[str, Any]:
     """先查术语词典（精确、可解释），再补语义检索（兜底）。"""
-    card = lex.concept_card(term)
-    names = {term}
-    if card:
-        names.add(card["name"])
-        names.update(card.get("aliases", []))
+    card, names = _term_names(lex, term)
+    ids = _tagged_ids(store, names)
 
-    ids: set[str] = set()
-    for name in names:
-        ids |= set(store.terms["concept"].get(name, []))
-        ids |= set(store.terms["philosopher"].get(name, []))
-        ids |= set(store.terms["unit"].get(name, []))
-
-    exact = [c for c in store.chunks if c.chunk_id in ids]
+    # 精确命中 = 注解倒排命中的块（不含纯字面提及）；按 id 取块，不再线性扫描全库
+    exact = [store.chunks[i] for i in (store.index_of(cid) for cid in ids) if i is not None]
     # 排序：正文优先 → 含定义句优先 → 术语密度高优先 → 文档序。
     # 只按文档序排会把「顺便提到」的块排到「定义它」的块前面。
     main = card["name"] if card else term
@@ -445,7 +481,7 @@ def quote_payload(store: Store, lex: Lexicon, **kw) -> dict[str, Any]:
                 "concepts": c.concepts,
                 "eras": c.eras,
                 "unit": c.unit_code(),
-                "unit_title": lex.unit_title(c.unit_code()),
+                "unit_title": lex.unit_title(c.unit_code(), c.chapter_path),
                 "volume": c.volume(),
                 "chapter_path": c.chapter_path,
                 "citation": c.citation(doc_title),
@@ -466,8 +502,8 @@ def facet_summary(store: Store, lex: Lexicon) -> dict[str, list[tuple[str, int]]
 
     # 说话人是引文专有维度：只统计有引述标记的归因，供「拉康原话」这类精确检索
     speakers: dict[str, list[str]] = {}
-    for c in store.chunks:
-        if c.chunk_type == "quote" and c.speaker:
+    for c in store.quotes():
+        if c.speaker:
             speakers.setdefault(c.speaker, []).append(c.chunk_id)
 
     return {
@@ -478,6 +514,59 @@ def facet_summary(store: Store, lex: Lexicon) -> dict[str, list[tuple[str, int]]
         "volume": top(store.terms["volume"], 10),
         "unit": top(store.terms["unit"], 60),
         "speaker": top(speakers),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 术语表：词典条目 + 索引落点（`cli glossary` 数据源）
+# --------------------------------------------------------------------------- #
+def glossary_payload(store: Store, lex: Lexicon) -> dict[str, Any]:
+    """术语表：全部词典概念 + 它们在本索引中的落点统计。
+
+    纯元数据统计，不做向量检索：命中数来自 `terms.json` 的 concept 倒排，
+    「首见单元」取该术语标注块里 seq 最小的一块（阅读顺序上的第一次出现），
+    引文数取与引文块的交集。没有命中的条目单独列在 `unused` 里——
+    这正是 `scripts/discover_terms.py` 想要的「配了却从未出现」清单。
+    """
+    quote_ids = {c.chunk_id for c in store.quotes()}
+    entries: list[dict[str, Any]] = []
+    for name, info in lex.concepts.items():
+        ids = list(store.terms["concept"].get(name, []))
+        first: Chunk | None = None
+        for cid in ids:
+            i = store.index_of(cid)
+            if i is None:
+                continue
+            c = store.chunks[i]
+            if first is None or c.seq < first.seq:
+                first = c
+        code = first.unit_code() if first is not None else ""
+        if first is None:
+            first_title = ""
+        elif code:
+            first_title = lex.unit_title(code, first.chapter_path)
+        else:
+            # 首见落在前言 / 体例 / 总纲等无编号章节：给出章节路径末级，仍能指向原文
+            first_title = first.chapter_path[-1] if first.chapter_path else ""
+        entries.append({
+            "name": name,
+            "aliases": list(info.get("aliases", [])),
+            "philosopher": info.get("philosopher", ""),
+            "lifespan": lex.lifespan(info.get("philosopher", "")),
+            "era": lex.era_of(info.get("philosopher", "")),
+            "school": lex.school_of(info.get("philosopher", "")),
+            "definition": info.get("definition", ""),
+            "hits": len(ids),
+            "quotes": sum(1 for cid in ids if cid in quote_ids),
+            "first_unit": code,
+            "first_unit_title": first_title,
+            "first_page": int(first.page or 0) if first is not None else 0,
+        })
+    entries.sort(key=lambda e: (-e["hits"], e["name"]))
+    return {
+        "count": len(entries),
+        "unused": [e["name"] for e in entries if e["hits"] == 0],
+        "entries": entries,
     }
 
 
@@ -505,17 +594,19 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
 
     std = card["name"]
     aliases = list(card.get("aliases") or [])
-    names = [std, *aliases]
+    names = list(dict.fromkeys([std, *aliases]))
 
-    def text_has(text: str, name: str) -> bool:
-        if name in text:
-            return True
-        if any(ch.isascii() and ch.isalpha() for ch in name):
-            return name.lower() in text.lower()
-        return False
+    # 候选块：注解倒排命中 ∪ 字面命中候选（超集，逐块复核）；ASCII 词面退回全库扫描
+    ids = _tagged_ids(store, names)
+    candidate_idx = _candidate_indices(store, ids, names)
 
     def chunk_hits(c: Chunk) -> bool:
-        return std in c.concepts or any(text_has(c.text, n) for n in names)
+        return std in c.concepts or any(_text_has(c.text, n) for n in names)
+
+    def hit_chunks() -> list[Chunk]:
+        if candidate_idx is None:
+            return [c for c in store.chunks if chunk_hits(c)]
+        return [store.chunks[i] for i in candidate_idx if chunk_hits(store.chunks[i])]
 
     # definition：正文中「X 是/即/意味着」的定义句式块。排序键优先正文块、
     # 优先标准名句式、优先与词典定义重合度高的块、优先术语密度高的块。
@@ -525,11 +616,10 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
     ]
     lex_tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", card.get("definition") or "")
     type_rank = {"body": 0, "footnote": 1, "quote": 2}
+    hits = hit_chunks()
     defn: Chunk | None = None
     defn_key: tuple | None = None
-    for c in store.chunks:
-        if not chunk_hits(c):
-            continue
+    for c in hits:
         if not any(p.search(c.text) for p in defn_pats):
             continue
         canon = 1 if defn_pat_std.search(c.text) else 0
@@ -555,7 +645,7 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
     definition = None
     if defn is not None:
         code = defn.unit_code()
-        title = lex.unit_title(code)
+        title = lex.unit_title(code, defn.chapter_path)
         definition = {
             "text": defn.text,
             "unit": code,
@@ -566,18 +656,18 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
         }
 
     unit_hits: dict[str, int] = {}
+    unit_paths: dict[str, list[str]] = {}
     phil_hits: dict[str, int] = {}
-    for c in store.chunks:
-        if not chunk_hits(c):
-            continue
+    for c in hits:
         code = c.unit_code()
         if code:
             unit_hits[code] = unit_hits.get(code, 0) + 1
+            unit_paths.setdefault(code, list(c.chapter_path))
         for p in c.philosophers:
             phil_hits[p] = phil_hits.get(p, 0) + 1
 
     units = [
-        {"code": code, "title": lex.unit_title(code), "hits": int(hits)}
+        {"code": code, "title": lex.unit_title(code, unit_paths.get(code)), "hits": int(hits)}
         for code, hits in sorted(unit_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
     ]
     philosophers = [
@@ -586,7 +676,7 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
     ]
 
     quote_chunks = [
-        c for c in store.quotes() if any(text_has(c.text, n) for n in names)
+        c for c in store.quotes() if any(_text_has(c.text, n) for n in names)
     ]
     quote_chunks.sort(key=lambda c: c.seq)
     quotes = [
@@ -594,7 +684,7 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
             "text": c.text,
             "speaker": c.speaker or "未署名",
             "unit": c.unit_code(),
-            "citation": cite(c.unit_code(), lex.unit_title(c.unit_code()), int(c.page or 0)),
+            "citation": cite(c.unit_code(), lex.unit_title(c.unit_code(), c.chapter_path), int(c.page or 0)),
         }
         for c in quote_chunks[:limit]
     ]

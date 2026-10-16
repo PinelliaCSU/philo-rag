@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from scripts.check_gate import CASES, RELEVANCE_CASES, combined_gate
 
 from philo_rag.gate import check_question, skip_answer
+from scripts.check_gate import CASES, RELEVANCE_CASES, combined_gate
 
 # 语义相关性用例要逐条跑一次检索，抽一部分代表用例即可（全量见 scripts/check_gate.py --relevance）
 RELEVANCE_SAMPLE = RELEVANCE_CASES[:3] + RELEVANCE_CASES[-4:]

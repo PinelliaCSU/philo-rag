@@ -16,6 +16,12 @@ from typing import Any
 from .gate import normalize
 from .index import Store
 from .lexicon import Lexicon
+from .text_rules import (
+    POINT_QUERY_PHRASES,
+    THEME_QUERY_PHRASES,
+    TOPIC_NOISE_PARTS,
+    phrase_alternation,
+)
 
 # --------------------------------------------------------------------------- #
 # 提问类型判定：点查询 vs 范围查询
@@ -30,26 +36,13 @@ from .lexicon import Lexicon
 #
 # 两者共用同一索引与同一返回结构（answer + citations），对用户是同一个入口，
 # 差别只体现在回答的深度与覆盖面。`ask --strategy auto|point|theme` 可显式指定。
-RE_THEME_QUERY = re.compile(
-    r"(思想|学说|理论体系|主题|脉络|谱系|全貌|综述|概览|概况|面貌|总体|整体|"
-    r"位置|地位|角色|分布|梳理|评述|论述|专题|系统地|全面地|"
-    r"谈谈|讲讲|说说|介绍一下|介绍下|展开说|展开讲)"
-)
-RE_POINT_QUERY = re.compile(
-    r"(什么是|何谓|何为|是什么意思|指的是什么|意指什么|是什么|指什么|"
-    r"在哪|哪里|何处|第几|哪一卷|哪个单元|谁|为什么|为何|如何|怎么)"
-)
+# 词表集中在 text_rules（与 gate 的提问句式同源）；**次序即语义**，勿按字母序重排
+RE_THEME_QUERY = re.compile("(" + phrase_alternation(THEME_QUERY_PHRASES) + ")")
+RE_POINT_QUERY = re.compile("(" + phrase_alternation(POINT_QUERY_PHRASES) + ")")
 RE_UNIT_ONLY = re.compile(r"^\d+(?:-\d+){1,3}$")
 
-# 从提问里剥掉「提问句式 + 主题修饰词」，剩下的就是主题词本身
-RE_TOPIC_NOISE = re.compile(
-    r"(什么是|何谓|何为|是什么意思|指的是什么|意指什么|是什么|指什么|"
-    r"在[^，。？；]{0,10}?(?:中|里|内)的?(?:位置|地位|角色|分布)|"
-    r"思想|学说|理论体系|主题|脉络|谱系|全貌|综述|概览|概况|面貌|总体|整体|"
-    r"位置|地位|角色|分布|梳理|评述|论述|专题|系统地|全面地|"
-    r"谈谈|讲讲|说说|介绍一下|介绍下|介绍|展开说|展开讲|展开|"
-    r"如何|怎么|怎样|为什么|为何|哪些|什么|请|请问|的|了|吗|呢|吧)"
-)
+# 从提问里剥掉「提问句式 + 主题修饰词 + 语气助词」，剩下的就是主题词本身
+RE_TOPIC_NOISE = re.compile("(" + phrase_alternation(TOPIC_NOISE_PARTS) + ")")
 _TRIM = " \u3000?？。！!，,、：:；;…~～·-—"
 
 
@@ -58,29 +51,36 @@ def _core_topic(question: str) -> str:
     return RE_TOPIC_NOISE.sub("", question or "").strip(_TRIM)
 
 
-def classify_question(question: str, lex: Lexicon | None = None) -> str:
-    """判定问题属于「点查询」还是「范围查询」。
+def route_question(question: str, lex: Lexicon | None = None) -> tuple[str, str]:
+    """判定召回策略并给出**可解释的理由**，返回 (strategy, reason)。
 
     顺序即优先级：先看有没有「主题式」措辞（思想 / 脉络 / 体系中的位置 / 谈谈 …），
     再看是不是一个**裸主题词**（「马克思」「精神分析」——词典能锚定、又不含提问句式），
     最后才落到点查询。定义式提问（「什么是 X」）始终走点查询，保证精确。
+
+    理由串会随问答结果返回（`route_reason`）：分流异常时不必翻代码猜判定依据。
     """
     q = (question or "").strip()
     if not q:
-        return "point"
+        return "point", "空问题按点查询处理"
     if RE_THEME_QUERY.search(q):
-        return "theme"
+        return "theme", "含主题式措辞（思想 / 脉络 / 位置 / 谈谈 …）"
     core = _core_topic(q)
     stripped = q.strip(_TRIM)
     if core and core == stripped and not RE_POINT_QUERY.search(q):
         # 整句就是一个主题词（无提问句式），例如「马克思」「精神分析」「辩证法」
         if RE_UNIT_ONLY.match(core):
-            return "point"
+            return "point", "整句是数值单元编号，按定位式提问处理"
         if lex is not None and (lex.match_philosophers(core) or lex.match_concepts(core)):
-            return "theme"
+            return "theme", "整句是词典锚定的裸主题"
         if 2 <= len(core) <= 12:
-            return "theme"
-    return "point"
+            return "theme", "整句是 2–12 字短实词裸主题"
+    return "point", "默认按点查询处理"
+
+
+def classify_question(question: str, lex: Lexicon | None = None) -> str:
+    """判定问题属于「点查询」还是「范围查询」（理由见 `route_question`）。"""
+    return route_question(question, lex)[0]
 
 
 def theme_topic(question: str, lex: Lexicon | None) -> str:
@@ -199,5 +199,11 @@ def _clarify_options(topic: str) -> list[dict[str, str]]:
 
 
 def _has_direct_topic_match(store: Store, topic: str) -> bool:
-    """语义相似度偏低时，仍放行正文确实出现过的主题。"""
-    return bool(topic) and any(topic in chunk.text for chunk in store.chunks)
+    """语义相似度偏低时，仍放行正文确实出现过的主题。
+
+    先用字符倒排取候选块（超集），再逐块 `in` 复核——判定结果与「遍历全库做子串
+    查找」完全一致，但不必对 6630 个块逐个做字符串搜索。
+    """
+    if not topic:
+        return False
+    return any(topic in store.chunks[i].text for i in store.literal_candidates([topic]))

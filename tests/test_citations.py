@@ -50,7 +50,7 @@ def test_hits_citations_carry_metadata(store, lex, cfg):
     assert first["char_span"] == f"{chunk.start}-{chunk.end}"
     assert first["citation"] == chunk.citation(doc_title)
     assert first["text"] == chunk.text
-    assert first["unit_title"] == lex.unit_title(chunk.unit_code())
+    assert first["unit_title"] == lex.unit_title(chunk.unit_code(), chunk.chapter_path)
 
 
 def test_group_citations_use_precomputed_citation(store, lex, cfg):

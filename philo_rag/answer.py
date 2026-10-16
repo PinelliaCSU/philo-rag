@@ -40,7 +40,6 @@
 """
 from __future__ import annotations
 
-import collections
 from typing import Any
 
 from .answer_evidence import (
@@ -65,6 +64,7 @@ from .gate import check_question, check_relevance, skip_answer
 from .index import Store
 from .lexicon import Lexicon
 from .llm import api_answer, api_answer_stream, ollama_answer
+from .lru import LruCache
 from .parse import (
     clean_generated_answer,
     parse_structured_answer,
@@ -76,22 +76,23 @@ from .routing import (
     _clarify_options,
     _has_direct_topic_match,
     clarify_broad_topic,
-    classify_question,
+    route_question,
     theme_topic,
 )
 
 # ---- 回答级 LRU 缓存 ----
 # (question, strategy) → answer 结果。命中时跳过检索与 LLM 生成，直接返回。
 # 对「卡片联动」场景（用户在术语卡之间跳转、反复查看相近问题）收益极大。
-_ANSWER_CACHE: collections.OrderedDict[tuple[str, str], dict[str, Any]] = collections.OrderedDict()
-_ANSWER_CACHE_MAX = 64
+# 用带锁的 LruCache 而非裸 OrderedDict：服务端同步端点跑在线程池里。
+_ANSWER_CACHE = LruCache(64)
 
 
 def _cache_put(key: tuple[str, str], result: dict[str, Any]) -> None:
-    _ANSWER_CACHE[key] = result
-    _ANSWER_CACHE.move_to_end(key)
-    while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
-        _ANSWER_CACHE.popitem(last=False)
+    _ANSWER_CACHE.put(key, result)
+
+
+def _cache_get(key: tuple[str, str]) -> dict[str, Any] | None:
+    return _ANSWER_CACHE.get(key)
 
 
 def template_answer(
@@ -190,6 +191,60 @@ def _point_generate(
     return clean_generated_answer(raw), [], []
 
 
+def _plan(
+    store: Store,
+    lex: Lexicon,
+    question: str,
+    cfg: dict[str, Any],
+    strategy: str,
+) -> tuple[str, dict[str, Any]]:
+    """问答链路的公共前置决策：闸门 → 语义相关性 → 澄清 → 点/范围判定。
+
+    非流式的 `answer()` 与流式的 `answer_stream()` 消费同一份决策结果。此前两条路径
+    各写一遍这套判断，新增一类拦截或调整判定顺序必须两处同改，行为容易悄悄漂移。
+
+    返回 (kind, data)：
+      ("gate",    {"gate", "answer"})            —— 不适合检索，直接跳过
+      ("clarify", {"topic", "gate", "options"})  —— 裸主题，先让用户选方向
+      ("theme",   {"topic", "gate"})             —— 范围查询
+      ("point",   {"gate"})                      —— 点查询
+    """
+    # ---- ① 问题闸门：不适合检索的问题在此终止，不进检索流程 ----
+    gate = check_question(question, lex, cfg)
+    if not gate["ok"]:
+        return "gate", {"gate": gate, "answer": skip_answer(gate)}
+
+    # ---- ①b 语义相关性格挡：无锚点、又和语料相似度过低的问题也直接跳过 ----
+    # 硬编码拦截模式（寒暄 / 实时信息 …）覆盖不了所有垃圾输入，这一层用
+    # 「查询与全语料的最高余弦相似度」做兜底：与本书无关的问题在此终止，
+    # 不需要跑检索，也不产生噪声结果。
+    gate_cfg = (cfg or {}).get("gate", {}) or {}
+    if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
+        rel_gate = check_relevance(store, question, cfg)
+        if not rel_gate["ok"] and not _has_direct_topic_match(store, theme_topic(question, lex)):
+            return "gate", {"gate": rel_gate, "answer": skip_answer(rel_gate)}
+
+    # ---- ①c 宽泛主题澄清：裸主题先选方向，短路在检索 / 生成之前 ----
+    backend = cfg["answer"].get("backend", "template")
+    clarify_topic = clarify_broad_topic(question, strategy, cfg, lex, backend=backend)
+    if clarify_topic:
+        return "clarify", {
+            "topic": clarify_topic,
+            "gate": gate,
+            "options": _clarify_options(clarify_topic),
+        }
+
+    # ---- ② 类型判定：同一个入口，按问题诉求选择召回策略 ----
+    strat = (strategy or "auto").lower()
+    if strat in ("point", "theme"):
+        reason = f"显式指定 strategy={strat}"
+    else:
+        strat, reason = route_question(question, lex)
+    if strat == "theme":
+        return "theme", {"topic": theme_topic(question, lex), "gate": gate, "route_reason": reason}
+    return "point", {"gate": gate, "route_reason": reason}
+
+
 def answer(
     store: Store,
     lex: Lexicon,
@@ -212,76 +267,45 @@ def answer(
     需要按单元 / 理论家 / 概念浏览时，请走 `term_lookup` / `quote_search` / 分面统计。
     """
     # ---- ⓪ LRU 缓存命中检查 ----
-    q_norm = (question or "").strip()
-    s_norm = (strategy or "auto").lower()
-    cache_key = (q_norm, s_norm)
-    cached = _ANSWER_CACHE.get(cache_key)
+    cache_key = ((question or "").strip(), (strategy or "auto").lower())
+    cached = _cache_get(cache_key)
     if cached is not None:
-        _ANSWER_CACHE.move_to_end(cache_key)
         return {**cached, "_cached": True}
 
-    # ---- ① 问题闸门：不适合检索的问题在此终止，不进检索流程 ----
-    gate = check_question(question, lex, cfg)
-    if not gate["ok"]:
+    # ---- ① 前置决策（与流式路径共用同一份判断，见 _plan）----
+    kind, data = _plan(store, lex, question, cfg, strategy)
+    if kind == "gate":
         result = {
             "question": question,
             "backend": "gate",
             "strategy": "gate",
             "skipped": True,
-            "gate": gate,
-            "answer": skip_answer(gate),
+            "gate": data["gate"],
+            "answer": data["answer"],
             "citations": [],
         }
         _cache_put(cache_key, result)
         return result
 
-    # ---- ①b 语义相关性格挡：无锚点、又和语料相似度过低的问题也直接跳过 ----
-    # 硬编码拦截模式（寒暄 / 实时信息 …）覆盖不了所有垃圾输入，这一层用
-    # 「查询与全语料的最高余弦相似度」做兜底：与本书无关的问题在此终止，
-    # 不需要跑检索，也不产生噪声结果。
-    gate_cfg = cfg.get("gate", {}) if cfg else {}
-    if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
-        rel_gate = check_relevance(store, question, cfg)
-        direct_topic = theme_topic(question, lex)
-        if not rel_gate["ok"] and not _has_direct_topic_match(store, direct_topic):
-            result = {
-                "question": question,
-                "backend": "gate",
-                "strategy": "gate",
-                "skipped": True,
-                "gate": rel_gate,
-                "answer": skip_answer(rel_gate),
-                "citations": [],
-            }
-            _ANSWER_CACHE[cache_key] = result
-            _ANSWER_CACHE.move_to_end(cache_key)
-            while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
-                _ANSWER_CACHE.popitem(last=False)
-            return result
-
-    # ---- ①c 宽泛主题澄清：裸主题先选方向，短路在检索/生成之前 ----
-    backend = cfg["answer"].get("backend", "template")
-    clarify_topic = clarify_broad_topic(question, strategy, cfg, lex, backend=backend)
-    if clarify_topic:
+    if kind == "clarify":
         result = {
             "strategy": "clarify",
-            "topic": clarify_topic,
+            "topic": data["topic"],
             "skipped": False,
             "citations": [],
-            "options": _clarify_options(clarify_topic),
-            "gate": gate,
+            "options": data["options"],
+            "gate": data["gate"],
         }
         _cache_put(cache_key, result)
         return result
 
-    # ---- ② 类型判定：同一个入口，按问题诉求选择召回策略 ----
-    strat = (strategy or "auto").lower()
-    if strat not in ("point", "theme"):
-        strat = classify_question(question, lex)
+    gate = data["gate"]
+    backend = cfg["answer"].get("backend", "template")
 
-    if strat == "theme":
-        res = theme_answer(store, lex, theme_topic(question, lex), cfg, focus=focus)
-        res.update(question=question, strategy="theme", gate=gate, skipped=False)
+    if kind == "theme":
+        res = theme_answer(store, lex, data["topic"], cfg, focus=focus)
+        res.update(question=question, strategy="theme", gate=gate, skipped=False,
+                   route_reason=data.get("route_reason", ""))
         _cache_put(cache_key, res)
         return res
 
@@ -318,15 +342,13 @@ def answer(
         "strategy": "point",
         "skipped": False,
         "gate": gate,
+        "route_reason": data.get("route_reason", ""),
         "answer": text,
         "citations": citations,
         "sections": sections,
         "annotations": annotations,
     }
-    _ANSWER_CACHE[cache_key] = result
-    _ANSWER_CACHE.move_to_end(cache_key)
-    while len(_ANSWER_CACHE) > _ANSWER_CACHE_MAX:
-        _ANSWER_CACHE.popitem(last=False)
+    _cache_put(cache_key, result)
     return result
 
 
@@ -348,40 +370,26 @@ def answer_stream(
 
     前端收到 meta 后立即渲染引用面板和卡片框架，收到 delta 后逐字追加到回答区域。
     """
-    # ---- ① 问题闸门 ----
-    gate = check_question(question, lex, cfg)
-    if not gate["ok"]:
-        yield {"type": "meta", "strategy": "gate", "gate": gate, "skipped": True,
-               "answer": skip_answer(gate), "citations": []}
+    # ---- ① 前置决策（与非流式路径共用同一份判断，见 _plan）----
+    kind, data = _plan(store, lex, question, cfg, strategy)
+    if kind == "gate":
+        yield {"type": "meta", "strategy": "gate", "gate": data["gate"], "skipped": True,
+               "answer": data["answer"], "citations": []}
         return
 
-    # ---- ①b 语义相关性格挡 ----
-    gate_cfg = cfg.get("gate", {}) if cfg else {}
-    if gate_cfg.get("relevance", True) and gate.get("anchor") is False:
-        rel_gate = check_relevance(store, question, cfg)
-        direct_topic = theme_topic(question, lex)
-        if not rel_gate["ok"] and not _has_direct_topic_match(store, direct_topic):
-            yield {"type": "meta", "strategy": "gate", "gate": rel_gate, "skipped": True,
-                   "answer": skip_answer(rel_gate), "citations": []}
-            return
-
-    # ---- ①c 宽泛主题澄清：裸主题先选方向，短路在检索/生成之前 ----
-    backend = cfg["answer"].get("backend", "template")
-    clarify_topic = clarify_broad_topic(question, strategy, cfg, lex, backend=backend)
-    if clarify_topic:
-        yield {"type": "meta", "strategy": "clarify", "topic": clarify_topic,
+    if kind == "clarify":
+        yield {"type": "meta", "strategy": "clarify", "topic": data["topic"],
                "skipped": False, "citations": [],
-               "options": _clarify_options(clarify_topic), "gate": gate}
+               "options": data["options"], "gate": data["gate"]}
         yield {"type": "done", "answer": ""}
         return
 
-    # ---- ② 类型判定 ----
-    strat = (strategy or "auto").lower()
-    if strat not in ("point", "theme"):
-        strat = classify_question(question, lex)
+    gate = data["gate"]
+    backend = cfg["answer"].get("backend", "template")
 
-    if strat == "theme":
-        yield from _theme_answer_stream(store, lex, theme_topic(question, lex), cfg, question, gate, focus=focus)
+    if kind == "theme":
+        yield from _theme_answer_stream(store, lex, data["topic"], cfg, question, gate,
+                                        focus=focus, route_reason=data.get("route_reason", ""))
         return
 
     max_ctx = int(cfg["answer"].get("max_context_chunks", 6))
@@ -405,6 +413,7 @@ def answer_stream(
         citations = citations_from_groups(citation_hits) if citation_hits else []
         yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
                "skipped": False, "citations": citations,
+               "route_reason": data.get("route_reason", ""),
                "sections": sections, "annotations": annotations}
         yield {"type": "delta", "text": text}
         yield {"type": "done", "answer": text}
@@ -420,6 +429,7 @@ def answer_stream(
         )
         yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
                "skipped": False, "citations": citations,
+               "route_reason": data.get("route_reason", ""),
                "sections": [], "annotations": []}
 
         if backend == "ollama":
@@ -460,7 +470,8 @@ def answer_stream(
     )
 
     yield {"type": "meta", "strategy": "point", "backend": backend, "gate": gate,
-           "skipped": False, "citations": citations}
+           "skipped": False, "citations": citations,
+           "route_reason": data.get("route_reason", "")}
 
     full_text: list[str] = []
     if backend == "ollama":

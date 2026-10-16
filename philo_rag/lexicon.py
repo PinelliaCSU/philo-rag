@@ -44,12 +44,16 @@ class Lexicon:
         self._cmp_cache_text: str | None = None
         self._cmp_cache: dict[str, list[tuple[int, int]]] = {}
         self._layer_names: list[str] = []
+        # 实际载入的词典文件（供索引指纹校验：文件内容变更后可比对索引是否过期）
+        self.sources: dict[str, Path] = {}
         # 体系目录
         self.title: str = ""
         self.volumes: list[str] = []
         self.axes: dict[str, list[dict[str, Any]]] = {}
         self.units: list[dict[str, Any]] = []
         self._unit_by_code: dict[str, dict[str, Any]] = {}
+        # 同码单元：一个编号可能对应多个条目（如各卷的「复习课」），编号不是主键
+        self.units_by_code: dict[str, list[dict[str, Any]]] = {}
         self._load(philosophers_path, concepts_path, taxonomy_path, themes_path)
 
     def _load(
@@ -83,6 +87,7 @@ class Lexicon:
             self.units = list(tax.get("units", []))
             for u in self.units:
                 self._unit_by_code.setdefault(u["code"], u)
+                self.units_by_code.setdefault(u["code"], []).append(u)
             # 四层名称按编号位序排列，供 unit 编码 → 坐标注解（见 coords_of）
             self._layer_names = [
                 str(x.get("name", ""))
@@ -102,6 +107,13 @@ class Lexicon:
                     if alias:
                         self._theme_alias.append((alias, name))
             self._theme_alias.sort(key=lambda x: len(x[0]), reverse=True)
+
+        # 记录本次真正读入的文件，供 manifest 指纹与一致性校验使用
+        self.sources = {"philosophers": Path(philosophers_path), "concepts": Path(concepts_path)}
+        if taxonomy_path and Path(taxonomy_path).exists():
+            self.sources["taxonomy"] = Path(taxonomy_path)
+        if themes_path and Path(themes_path).exists():
+            self.sources["themes"] = Path(themes_path)
 
     # ---------- 匹配 ----------
     #
@@ -337,9 +349,35 @@ class Lexicon:
     def unit(self, code: str) -> dict[str, Any] | None:
         return self._unit_by_code.get(code)
 
-    def unit_title(self, code: str) -> str:
-        u = self._unit_by_code.get(code)
-        return u["title"] if u else ""
+    def unit_title(self, code: str, chapter_path: list[str] | None = None) -> str:
+        """单元标题；同码条目（如 `1-1` 既是「科学实在论」又有「复习课」）按章节路径消歧。
+
+        传入块的 `chapter_path` 时，优先取标题确实出现在章节路径里的那个条目；
+        未传（或只有一个条目）时退回目录中的首个条目，与旧行为一致。
+        """
+        entries = self.units_by_code.get(code) or []
+        if not entries:
+            u = self._unit_by_code.get(code)
+            return u["title"] if u else ""
+        if len(entries) > 1 and chapter_path:
+            for u in entries:
+                title = str(u.get("title", ""))
+                if title and any(title in part for part in chapter_path):
+                    return title
+        return str(entries[0].get("title", ""))
+
+    def duplicate_unit_codes(self) -> dict[str, list[str]]:
+        """同码单元清单：编号 → 该编号下的全部标题（只有一个条目的不收录）。
+
+        体系目录共 338 个条目，但唯一编号少于条目数（多卷的「复习课」与所属单元
+        共用编号）。这里把重复显式暴露，供 `stats` 诊断与测试固定行为，
+        避免「静默取首个条目」这类不可见的数据折损。
+        """
+        return {
+            code: [str(u.get("title", "")) for u in items]
+            for code, items in sorted(self.units_by_code.items())
+            if len(items) > 1
+        }
 
     def volume_of(self, code: str) -> str:
         u = self._unit_by_code.get(code)

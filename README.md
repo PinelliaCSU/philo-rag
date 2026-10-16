@@ -81,10 +81,11 @@ python -m philo_rag.cli serve
 ```powershell
 python -m philo_rag.cli prepare  # 从 doc.raw 生成清洗后的语料
 python -m philo_rag.cli build
-python -m philo_rag.cli stats
+python -m philo_rag.cli stats    # 概览 + 索引一致性；--verify 不一致时返回退出码 1
 ```
 
-只修改回答后端或 API 配置时，不需要重建索引。
+只修改回答后端或 API 配置时，不需要重建索引。分块参数或词典改动后，
+`stats` / `stats --verify` 会直接指出索引已与配置不一致，照提示重建即可。
 
 ## 命令行用法
 
@@ -104,6 +105,9 @@ python -m philo_rag.cli quote --unit 3-2 --keyword "主体"
 
 # 分面统计
 python -m philo_rag.cli facets
+
+# 术语表（词典条目 + 命中块/引文块/首见单元）
+python -m philo_rag.cli glossary --format md --out outputs/术语表.md
 
 # 输出为文件
 python -m philo_rag.cli ask "什么是存在者整体？" --format md --out outputs/存在者整体.md
@@ -141,6 +145,7 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 | `POST /api/ask` | 溯源回答 |
 | `GET /api/facets` | 分面统计 |
 | `GET /api/units` | 体系目录 |
+| `GET /api/unit?code=3-2-1` | 单元导览（单元元信息 + 块列表 / 术语 / 理论家） |
 
 ## 开发与自检
 

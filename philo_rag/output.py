@@ -45,6 +45,11 @@ def _dump_json(obj: Any, indent: int = 2) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=indent)
 
 
+def _cell(v: Any) -> str:
+    """Markdown 表格单元格：折叠换行、转义竖线（定义里可能带换行或竖线）。"""
+    return _flat(v).replace("\n", " ").replace("|", "\\|")
+
+
 # --------------------------------------------------------------------------- #
 # 问答
 # --------------------------------------------------------------------------- #
@@ -281,12 +286,56 @@ def render_eval(res: dict[str, Any], fmt: str) -> str:
     return "\n".join(out) + "\n"
 
 
+def render_glossary(res: dict[str, Any], fmt: str) -> str:
+    """术语表：词典条目 + 索引落点统计（命中块 / 引文块 / 首见单元）。"""
+    entries = res["entries"]
+    if fmt == "json":
+        return _dump_json(res)
+    if fmt == "jsonl":
+        return "\n".join(json.dumps(e, ensure_ascii=False) for e in entries)
+    if fmt == "csv":
+        return _csv(entries, ["name", "philosopher", "lifespan", "era", "school",
+                              "hits", "quotes", "first_unit", "first_unit_title",
+                              "first_page", "aliases", "definition"])
+    if fmt == "txt":
+        lines = [
+            f"{e['name']}（{e['philosopher'] or '—'}，{e['lifespan'] or '—'}）"
+            f"命中 {e['hits']} 块 / 引文 {e['quotes']} 块"
+            for e in entries
+        ]
+        return "\n".join(lines) + "\n"
+
+    columns = ("术语", "归属理论家", "生卒", "命中块", "引文块", "首见单元", "定义")
+    out = [f"# 术语表（{res['count']} 条）\n",
+           "| " + " | ".join(columns) + " |",
+           "|" + "---|" * len(columns)]
+    for e in entries:
+        unit = f"{e['first_unit']} {e['first_unit_title']}".strip() or "—"
+        out.append(
+            "| " + " | ".join([
+                _cell(e["name"]),
+                _cell(e["philosopher"] or "—"),
+                _cell(e["lifespan"] or "—"),
+                _cell(e["hits"]),
+                _cell(e["quotes"]),
+                _cell(unit),
+                _cell(e["definition"] or "—"),
+            ]) + " |"
+        )
+    if res.get("unused"):
+        out.append("")
+        out.append(f"> 词典里配置、但索引中一次都没命中的术语（{len(res['unused'])} 条）："
+                   + "、".join(res["unused"][:40]))
+    return "\n".join(out) + "\n"
+
+
 RENDERERS = {
     "answer": render_answer,
     "term": render_term,
     "quote": render_quote,
     "facets": render_facets,
     "eval": render_eval,
+    "glossary": render_glossary,
 }
 
 

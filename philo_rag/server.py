@@ -12,6 +12,7 @@
     GET  /api/stats           索引概览（含当前生成后端）
     GET  /api/facets          分面统计（筛选维度）
     GET  /api/units           体系目录（卷 → 单元）
+    GET  /api/unit?code=      单元导览（单元元信息 + 该单元的块/术语/理论家）
     GET  /api/concepts        术语卡列表
     POST /api/ask             溯源回答（body 可传 strategy：auto | point | theme）
     POST /api/ask_stream      溯源回答（SSE 流式：meta → delta… → done）
@@ -102,7 +103,7 @@ def _load(cfg: dict) -> Runtime:
         raise SystemExit(f"索引不存在：{store_dir}\n请先运行：python -m philo_rag.cli build")
 
     t0 = time.perf_counter()
-    store = Store.load(store_dir, lex)
+    store = Store.load(store_dir, lex, cfg)
     print(f"[info] 索引已载入：{len(store.chunks)} 块（{time.perf_counter() - t0:.1f}s）", flush=True)
     _RUNTIME = Runtime(cfg=cfg, store=store, lex=lex)
 
@@ -180,6 +181,67 @@ def create_app(cfg: dict) -> FastAPI:
     @app.get("/api/units")
     def units() -> list[dict]:
         return rt.lex.units
+
+    @app.get("/api/unit")
+    def unit(code: str = Query(..., min_length=1), limit: int = 40) -> dict:
+        """单元导览：单元元信息 + 该单元（含子单元）的块列表。
+
+        `code` 支持任意层级（'1' / '1-1' / '3-2-1'）；块按阅读顺序返回，
+        术语与理论家按该单元内的出现频次排序。编号不是主键——体系目录存在同码的
+        「复习课」条目，标题取目录中的首个条目（见 docs/架构设计.md 的索引一节）。
+        """
+        store, lex = rt.store, rt.lex
+        entry = lex.unit(code)
+        if entry is None:
+            raise HTTPException(404, f"单元不存在：{code}")
+
+        ids: set[str] = set()
+        for sub in lex.codes_under(code):
+            ids |= set(store.terms["unit"].get(sub, []))
+        chunks = [
+            store.chunks[i]
+            for i in sorted(i for i in (store.index_of(cid) for cid in ids) if i is not None)
+        ]
+
+        concepts: dict[str, int] = {}
+        philosophers: dict[str, int] = {}
+        for c in chunks:
+            for t in c.concepts:
+                concepts[t] = concepts.get(t, 0) + 1
+            for p in c.philosophers:
+                philosophers[p] = philosophers.get(p, 0) + 1
+
+        depth = int(entry.get("depth") or 0)
+        children: list[dict[str, str]] = []
+        seen_codes: set[str] = set()
+        for u in lex.units:
+            child = str(u["code"])
+            if child in seen_codes or int(u.get("depth") or 0) != depth + 1:
+                continue
+            if child.startswith(str(code) + "-"):
+                seen_codes.add(child)
+                children.append({"code": child, "title": str(u.get("title", ""))})
+
+        def top(counts: dict[str, int], n: int = 12) -> list[dict[str, Any]]:
+            return [{"name": k, "count": v}
+                    for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
+
+        return {
+            "code": code,
+            "title": lex.unit_title(code),
+            "volume": lex.volume_of(code),
+            "depth": depth,
+            "head": lex.head_of(code),
+            "coords": lex.coords_of(code),
+            "children": children,
+            "counts": {
+                "chunks": len(chunks),
+                "quotes": sum(1 for c in chunks if c.chunk_type == "quote"),
+            },
+            "concepts": top(concepts),
+            "philosophers": top(philosophers),
+            "items": [_chunk_json(c, lex, store) for c in chunks[: max(0, int(limit))]],
+        }
 
     @app.get("/api/concepts")
     def concepts() -> list[dict]:
@@ -275,7 +337,7 @@ def create_app(cfg: dict) -> FastAPI:
     def context(chunk_id: str, window: int = 2) -> dict:
         """取某块及其前后各 window 块，用于界面上的「查看上下文」。"""
         store, lex = rt.store, rt.lex
-        idx = next((i for i, c in enumerate(store.chunks) if c.chunk_id == chunk_id), None)
+        idx = store.index_of(chunk_id)
         if idx is None:
             raise HTTPException(404, f"chunk 不存在：{chunk_id}")
         lo, hi = max(0, idx - window), min(len(store.chunks), idx + window + 1)
@@ -298,7 +360,7 @@ def _chunk_json(c: Chunk, lex: Lexicon, store: Store) -> dict:
         "chunk_type": c.chunk_type,
         "chapter_path": c.chapter_path,
         "unit": c.unit_code(),
-        "unit_title": lex.unit_title(c.unit_code()),
+        "unit_title": lex.unit_title(c.unit_code(), c.chapter_path),
         "volume": c.volume(),
         "philosophers": c.philosophers,
         "concepts": c.concepts,

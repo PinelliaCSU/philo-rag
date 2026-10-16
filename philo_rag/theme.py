@@ -81,9 +81,8 @@ def _anchor(lex: Lexicon, topic: str) -> tuple[list[str], list[str], list[str]]:
         concs.append(topic)
 
     units: list[str] = []
-    for code in lex._unit_by_code:  # noqa: SLF001 - 同包内访问
-        title = lex.unit_title(code)
-        if topic and topic in title:
+    for code, items in lex.units_by_code.items():
+        if topic and any(topic in str(u.get("title", "")) for u in items):
             units.append(code)
     # 流派/思潮级主题回退：理论家与概念都未命中时，用主题词典补锚点。
     if not phils and not concs:
@@ -113,16 +112,18 @@ def _collect(
     """
     literals = {t for t in ([topic, *phils, *concs] if include_metadata else [topic]) if t}
     pset, cset, uset = set(phils), set(concs), set(units)
+    # 字面候选：字符倒排给出超集，逐块 `in` 复核 —— 与「全库扫描 + 子串判断」等价
+    candidates = store.literal_candidates(literals)
     meta: list[Chunk] = []
     literal: list[Chunk] = []
-    for c in store.chunks:
+    for idx, c in enumerate(store.chunks):
         if include_metadata and (
             (pset & set(c.philosophers))
             or (cset & set(c.concepts))
             or (uset & set(c.unit_codes()))
         ):
             meta.append(c)
-        elif any(t in c.text for t in literals):
+        elif idx in candidates and any(t in c.text for t in literals):
             literal.append(c)
     return {"meta": meta, "literal": literal}
 
@@ -240,7 +241,7 @@ def _aggregate_by_unit(
         out.append(
             {
                 "code": "" if code == UNKNOWN_UNIT else code,
-                "title": lex.unit_title(code) if code != UNKNOWN_UNIT else UNKNOWN_UNIT,
+                "title": lex.unit_title(code, items[0].chapter_path) if code != UNKNOWN_UNIT else UNKNOWN_UNIT,
                 "volume": lex.volume_of(code) if code != UNKNOWN_UNIT else "",
                 "hits": hits,
                 "total": total,

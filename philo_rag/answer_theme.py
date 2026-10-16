@@ -321,6 +321,7 @@ def _theme_answer_stream(
     store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any],
     question: str, gate: dict[str, Any],
     focus: str | None = None,
+    route_reason: str = "",
 ):
     """范围查询的流式生成，被 answer_stream 调用。"""
     from .theme import theme_search
@@ -345,6 +346,7 @@ def _theme_answer_stream(
             "backend": backend,
             "gate": gate,
             "skipped": False,
+            "route_reason": route_reason,
             "citations": [],
             "sections": [],
             "annotations": [],
@@ -373,7 +375,8 @@ def _theme_answer_stream(
     if backend == "template":
         text, citations, sections, annotations = render_theme(res, lex, cfg)
         yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
-               "skipped": False, "citations": citations, "theme": theme_meta,
+               "skipped": False, "route_reason": route_reason, "citations": citations,
+               "theme": theme_meta,
                "sections": sections, "annotations": annotations,
                "question": question}
         yield {"type": "delta", "text": text}
@@ -391,7 +394,8 @@ def _theme_answer_stream(
             focus_guide=focus_guide(focus),
         )
         yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
-               "skipped": False, "citations": citations, "theme": theme_meta,
+               "skipped": False, "route_reason": route_reason, "citations": citations,
+               "theme": theme_meta,
                "sections": [], "annotations": [],
                "question": question}
 
@@ -436,7 +440,8 @@ def _theme_answer_stream(
     )
 
     yield {"type": "meta", "strategy": "theme", "backend": backend, "gate": gate,
-           "skipped": False, "citations": citations, "theme": theme_meta,
+           "skipped": False, "route_reason": route_reason, "citations": citations,
+           "theme": theme_meta,
            "question": question}
 
     full_text: list[str] = []

@@ -90,6 +90,26 @@ def test_quote_and_facets_return_payloads(client):
     assert facets.json()
 
 
+def test_unit_endpoint_returns_chunks_in_reading_order(client):
+    resp = client.get("/api/unit", params={"code": "1-1", "limit": 5})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == "1-1"
+    assert body["counts"]["chunks"] > 0
+    assert body["title"] and body["volume"]
+    assert len(body["items"]) <= 5
+    starts = [item["start"] for item in body["items"]]
+    assert starts == sorted(starts)
+    assert body["concepts"] and body["philosophers"]
+
+
+def test_unit_endpoint_lists_children_and_rejects_unknown(client):
+    body = client.get("/api/unit", params={"code": "1"}).json()
+    assert any(child["code"].startswith("1-") for child in body["children"])
+    assert body["head"]
+    assert client.get("/api/unit", params={"code": "9-9-9"}).status_code == 404
+
+
 def test_context_returns_neighbour_chunks_and_404(client):
     ask = client.post("/api/ask", json={"question": "什么是字头？【web-ctx】"}).json()
     chunk_id = ask["citations"][0]["chunk_id"]

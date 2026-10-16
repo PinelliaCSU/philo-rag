@@ -7,24 +7,26 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
+import threading
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from .lru import LruCache
+
 # --------------------------------------------------------------------------- #
 # 重排器（交叉编码器，可选）：本地路径解析 + 实例缓存 + 离线护栏
 # --------------------------------------------------------------------------- #
 _RERANK_CACHE: dict[tuple[str, str], Any] = {}
+_RERANK_LOAD_LOCK = threading.Lock()
 
 # 重排输入默认截断长度：交叉编码器的耗时与输入长度成正比，见 _rerank 的说明。
 DEFAULT_RERANK_MAX_CHARS = 320
 
-# 「问题 + 候选块 → 分数」的 LRU。同一问题重复提问（界面卡片联动、复看、对比）
-# 不该再算一遍重排——那是每次提问里最贵的一步。
-_RERANK_SCORE_CACHE: OrderedDict[tuple, list[float]] = OrderedDict()
-_RERANK_SCORE_CACHE_MAX = 256
+# 「问题 + 候选块 → 分数」的 LRU（带锁）。同一问题重复提问（界面卡片联动、复看、
+# 对比）不该再算一遍重排——那是每次提问里最贵的一步。
+_RERANK_SCORE_CACHE = LruCache(256)
 
 
 def _resolve_model_path(model: str, root: str | Path | None) -> str:
@@ -57,24 +59,30 @@ def _load_reranker(cfg: dict[str, Any]) -> Any | None:
     if key in _RERANK_CACHE:
         return _RERANK_CACHE[key]  # 可能是 None（负面缓存）
 
-    if not Path(resolved).exists():
-        print(f"[warn] 重排模型不可用（{resolved} 不存在），已退回融合结果。"
-              f"下载后放入该目录，或改 retrieval.rerank_model。")
-        _RERANK_CACHE[key] = None
-        return None
+    # 冷启动昂贵：并发首问时只让一个线程真正加载，其余线程等它写回缓存，
+    # 避免同一份权重被加载多次（服务端同步端点跑在线程池里）。
+    with _RERANK_LOAD_LOCK:
+        if key in _RERANK_CACHE:
+            return _RERANK_CACHE[key]
 
-    try:
-        from sentence_transformers import CrossEncoder
+        if not Path(resolved).exists():
+            print(f"[warn] 重排模型不可用（{resolved} 不存在），已退回融合结果。"
+                  f"下载后放入该目录，或改 retrieval.rerank_model。")
+            _RERANK_CACHE[key] = None
+            return None
 
-        # max_length 与 rerank_max_chars(256) 对齐：输入已截断到 256 字符，
-        # 默认 max_length=512 会导致 padding 浪费计算。设 256 不改变打分结果。
-        ce = CrossEncoder(resolved, max_length=256)
-        _RERANK_CACHE[key] = ce
-        return ce
-    except Exception as exc:  # noqa: BLE001
-        print(f"[warn] 重排器加载失败，已退回融合结果：{exc}")
-        _RERANK_CACHE[key] = None
-        return None
+        try:
+            from sentence_transformers import CrossEncoder
+
+            # max_length 与 rerank_max_chars(256) 对齐：输入已截断到 256 字符，
+            # 默认 max_length=512 会导致 padding 浪费计算。设 256 不改变打分结果。
+            ce = CrossEncoder(resolved, max_length=256)
+            _RERANK_CACHE[key] = ce
+            return ce
+        except Exception as exc:  # noqa: BLE001
+            print(f"[warn] 重排器加载失败，已退回融合结果：{exc}")
+            _RERANK_CACHE[key] = None
+            return None
 
 
 def _clip_chunk_text(text: str, limit: int) -> str:
@@ -132,11 +140,7 @@ def _rerank(
         if not isinstance(raw, (list, np.ndarray)):
             raw = [raw]
         scores = [float(s) for s in raw]
-        _RERANK_SCORE_CACHE[key] = scores
-        while len(_RERANK_SCORE_CACHE) > _RERANK_SCORE_CACHE_MAX:
-            _RERANK_SCORE_CACHE.popitem(last=False)
-    else:
-        _RERANK_SCORE_CACHE.move_to_end(key)
+        _RERANK_SCORE_CACHE.put(key, scores)
 
     for r, s in zip(head, scores):
         r["rerank_score"] = s

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -127,6 +128,7 @@ class APIEmbedder(BaseEmbedder):
 
 
 _CACHE: dict[tuple, BaseEmbedder] = {}
+_CACHE_LOCK = threading.Lock()
 
 
 def _cache_key(cfg: dict[str, Any], root: str | Path | None) -> tuple:
@@ -144,36 +146,42 @@ def _cache_key(cfg: dict[str, Any], root: str | Path | None) -> tuple:
 def get_embedder(cfg: dict[str, Any], root: str | Path | None = None) -> BaseEmbedder:
     """按配置构造嵌入后端（带缓存）。
 
-    模型加载很贵（bge-small 冷启动约 20 秒），服务化场景下每次查询都重建会直接
-    拖垮响应时间，因此按配置指纹缓存实例。
+    模型加载很贵（bge-base 冷启动约 10 秒），服务化场景下每次查询都重建会直接
+    拖垮响应时间，因此按配置指纹缓存实例。缓存与构造都在同一把锁内完成：
+    并发首问时只让一个线程真正加载模型，其余线程复用同一个实例。
 
     model 为相对路径时相对 root（项目根）解析，便于把模型随项目一起分发。
     """
     key = _cache_key(cfg, root)
     if key in _CACHE:
         return _CACHE[key]
+    with _CACHE_LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+        emb = _create(cfg, root)
+        _CACHE[key] = emb
+        return emb
 
+
+def _create(cfg: dict[str, Any], root: str | Path | None) -> BaseEmbedder:
+    """按 backend 构造嵌入实例（不查缓存，只由 get_embedder 在锁内调用）。"""
     backend = cfg.get("backend", "hashing")
     if backend == "hashing":
-        emb: BaseEmbedder = HashingEmbedder(dim=int(cfg.get("dim", 512)))
-    elif backend == "sentence_transformer":
+        return HashingEmbedder(dim=int(cfg.get("dim", 512)))
+    if backend == "sentence_transformer":
         model = str(cfg["model"])
         if root is not None:
             p = Path(model)
             if not p.is_absolute() and (Path(root) / p).exists():
                 model = str(Path(root) / p)
-        emb = SentenceTransformerEmbedder(
+        return SentenceTransformerEmbedder(
             model,
             int(cfg.get("batch_size", 32)),
             str(cfg.get("device", "cpu")),
         )
-    elif backend == "api":
-        emb = APIEmbedder(
+    if backend == "api":
+        return APIEmbedder(
             cfg["model"], cfg.get("api_base", ""), cfg.get("api_key", ""),
             int(cfg.get("batch_size", 32)),
         )
-    else:
-        raise ValueError(f"未知 embedding.backend：{backend}")
-
-    _CACHE[key] = emb
-    return emb
+    raise ValueError(f"未知 embedding.backend：{backend}")

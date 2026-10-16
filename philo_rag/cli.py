@@ -3,8 +3,8 @@
     prepare  采集清洗语料        build   构建索引
     ask      溯源回答（自动判定点查询 / 范围查询）
     term     术语索引与语义检索  quote   引文检索
-    facets   分面统计与体系浏览
-    eval     检索质量评测        stats   索引概览
+    facets   分面统计与体系浏览  glossary 术语表导出
+    eval     检索质量评测        stats   索引概览（--verify 校验一致性）
     serve    Web 服务            demo    一键自检
 
 `ask` 是唯一的问答入口：内部按问题诉求自动选择召回策略——
@@ -123,7 +123,7 @@ def open_store(cfg: dict) -> tuple[Store, Lexicon]:
     store_dir = Path(cfg["doc"]["store_dir"])
     if not (store_dir / "chunks.jsonl").exists():
         raise SystemExit(f"索引不存在：{store_dir}\n请先运行：python -m philo_rag.cli build")
-    return Store.load(store_dir, lex), lex
+    return Store.load(store_dir, lex, cfg), lex
 
 
 def _rule(title: str) -> None:
@@ -181,6 +181,19 @@ def cmd_stats(cfg: dict, args: argparse.Namespace) -> None:
     for axis in ("字头", "四层", "四话语"):
         items = lex.axis(axis)
         print(f"  {axis}：" + "　".join(f"{x['code']}={x['name']}" for x in items))
+    dup = lex.duplicate_unit_codes()
+    same = f"，同码 {len(dup)} 组（{'、'.join(list(dup)[:4])}…）" if dup else ""
+    print(f"  单元目录：{len(lex.units)} 条目 / {len(lex.units_by_code)} 个唯一编号{same}")
+    _rule("索引一致性")
+    problems = store.check_consistency(cfg, lex)
+    if problems:
+        for p in problems:
+            print(f"  ✗ {p}")
+        print("  → 运行 `python -m philo_rag.cli build` 重建索引后恢复一致。")
+        if getattr(args, "verify", False):
+            raise SystemExit(1)
+    else:
+        print("  ✓ 分块参数与词典指纹均与索引一致")
 
 
 def cmd_ask(cfg: dict, args: argparse.Namespace) -> None:
@@ -216,6 +229,14 @@ def cmd_quote(cfg: dict, args: argparse.Namespace) -> None:
 def cmd_facets(cfg: dict, args: argparse.Namespace) -> None:
     store, lex = open_store(cfg)
     _emit("facets", facet_summary(store, lex), args, cfg)
+
+
+def cmd_glossary(cfg: dict, args: argparse.Namespace) -> None:
+    """术语表导出：词典条目 + 索引落点（命中块 / 引文块 / 首见单元）。"""
+    from .retrieve import glossary_payload
+
+    store, lex = open_store(cfg)
+    _emit("glossary", glossary_payload(store, lex), args, cfg)
 
 
 def cmd_eval(cfg: dict, args: argparse.Namespace) -> None:
@@ -332,7 +353,11 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("prepare", help="采集并清洗原始语料").set_defaults(func=cmd_prepare)
     sub.add_parser("build", help="构建索引").set_defaults(func=cmd_build)
-    sub.add_parser("stats", help="索引概览").set_defaults(func=cmd_stats)
+
+    p_stats = sub.add_parser("stats", help="索引概览与一致性校验")
+    p_stats.add_argument("--verify", action="store_true",
+                         help="索引与配置/词典不一致时以非零退出码结束（供脚本与 CI 使用）")
+    p_stats.set_defaults(func=cmd_stats)
 
     p_ask = sub.add_parser("ask", help="溯源回答（自动判定点查询 / 范围查询）")
     p_ask.add_argument("question")
@@ -364,6 +389,10 @@ def main(argv: list[str] | None = None) -> None:
     p_facets = sub.add_parser("facets", help="分面统计")
     _add_common(p_facets)
     p_facets.set_defaults(func=cmd_facets)
+
+    p_gloss = sub.add_parser("glossary", help="术语表导出（词典 + 索引落点统计）")
+    _add_common(p_gloss)
+    p_gloss.set_defaults(func=cmd_glossary)
 
     p_eval = sub.add_parser("eval", help="检索质量回归评测")
     p_eval.add_argument("--top-k", type=int, default=8)

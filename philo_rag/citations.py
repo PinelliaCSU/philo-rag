@@ -90,7 +90,7 @@ def citations_from_hits(
                 citation=c.citation(doc_title),
                 chapter_path=c.chapter_path,
                 unit=c.unit_code(),
-                unit_title=lex.unit_title(c.unit_code()),
+                unit_title=lex.unit_title(c.unit_code(), c.chapter_path),
                 volume=c.volume(),
                 char_span=f"{c.start}-{c.end}",
                 start=c.start,
