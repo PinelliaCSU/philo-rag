@@ -331,11 +331,14 @@ def build_glossary(question: str, context_texts: list[str], lex: Lexicon,
 # 术语注解（正文之外，随 payload/渲染输出）
 # --------------------------------------------------------------------------- #
 def _term_counts(text: str, lex: Lexicon) -> dict[str, int]:
+    """按词典匹配统计术语出现次数。
+
+    与注解共用同一套别名守卫（`Lexicon.iter_concepts`），避免「道德」里的「道」——
+    否则术语注解会挑出根本没在这段资料里出现的词。
+    """
     counts: dict[str, int] = {}
-    for name, info in lex.concepts.items():
-        n = sum(text.count(alias) for alias in (name, *(info.get("aliases") or [])) if alias)
-        if n:
-            counts[name] = n
+    for _start, _end, name in lex.iter_concepts(text):
+        counts[name] = counts.get(name, 0) + 1
     return counts
 
 
