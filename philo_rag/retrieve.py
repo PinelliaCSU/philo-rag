@@ -201,19 +201,46 @@ def hybrid_search(
     dense = dense[:dense_k]
     sparse = sparse[:sparse_k]
 
-    fused = rrf_fuse(
-        [dense, sparse],
-        int(r_cfg.get("rrf_k", 60)),
-        [float(r_cfg.get("dense_weight", 1.0)), float(r_cfg.get("sparse_weight", 1.0))],
-    )
+    # 查询实体（哲学家 / 概念）：既用于元数据通道，也用于实体加权与「命中注解」
+    q_phil = set(lex.match_philosophers(query)) if lex else set()
+    q_conc = set(lex.match_concepts(query)) if lex else set()
+
+    # 元数据通道：把「查询实体 ∩ 块注解」做成一路**排名**（而不是固定加成），
+    # 与稠密 / 稀疏一起进 RRF。权重 meta_weight=0 时该通道整体关闭，
+    # 检索行为与旧版完全一致（便于冻结评测基线做 A/B）。
+    rankings: list[list[tuple[int, float]]] = [dense, sparse]
+    weights: list[float] = [
+        float(r_cfg.get("dense_weight", 1.0)),
+        float(r_cfg.get("sparse_weight", 1.0)),
+    ]
+    meta_weight = float(r_cfg.get("meta_weight", 0.0))
+    meta_pos: dict[int, int] = {}
+    if meta_weight and (q_phil or q_conc):
+        meta_k = int(r_cfg.get("meta_top_k", 40))
+        # 章节级注解是推断层：算半分，避免「兄弟块提到过」压过「本块精确命中」
+        section_half = float(r_cfg.get("meta_section_weight", 0.5))
+        meta_scored: list[tuple[float, int]] = []
+        for idx, c in enumerate(store.chunks):
+            exact = len(q_phil & set(c.philosophers)) + len(q_conc & set(c.concepts))
+            section = len(q_phil & set(c.section_philosophers)) \
+                + len(q_conc & set(c.section_concepts))
+            score = exact + section_half * section
+            if score > 0:
+                meta_scored.append((score, idx))
+        meta_scored.sort(key=lambda x: (-x[0], x[1]))
+        meta = [(idx, sc) for sc, idx in meta_scored[:meta_k]]
+        if meta:
+            rankings.append(meta)
+            weights.append(meta_weight)
+            meta_pos = {idx: r for r, (idx, _) in enumerate(meta, start=1)}
+
+    fused = rrf_fuse(rankings, int(r_cfg.get("rrf_k", 60)), weights)
     dense_pos = {i: r for r, (i, _) in enumerate(dense, start=1)}
     sparse_pos = {i: r for r, (i, _) in enumerate(sparse, start=1)}
 
     # 实体加权：查询中出现的哲学家/概念，若被块标注命中，给予小幅加分。
     # 这一步是「元数据即信号」——它把词典层已经算好的结构化信息用起来，
     # 同时为 RRF 的平票提供有意义的确定性排序依据。
-    q_phil = set(lex.match_philosophers(query)) if lex else set()
-    q_conc = set(lex.match_concepts(query)) if lex else set()
     boost = float(r_cfg.get("entity_boost", 0.003))
 
     # 定义句加权：问「什么是 X」时，真正**定义** X 的块应当压过只是**用到** X 的块。
@@ -229,7 +256,11 @@ def hybrid_search(
             score += boost * hits
         if def_boost:
             score += def_boost * _definition_score(c.text, def_terms)
-        best_rank = min(dense_pos.get(idx, 10**6), sparse_pos.get(idx, 10**6))
+        best_rank = min(
+            dense_pos.get(idx, 10**6),
+            sparse_pos.get(idx, 10**6),
+            meta_pos.get(idx, 10**6),
+        )
         scored.append((score, best_rank, idx))
 
     # 排序键：(融合分降序, 最好名次升序, 块序升序) —— 消除平票的任意性
@@ -244,8 +275,11 @@ def hybrid_search(
                 "score": score,
                 "dense_rank": dense_pos.get(idx),
                 "sparse_rank": sparse_pos.get(idx),
-                "matched_concepts": c.concepts,
-                "matched_philosophers": c.philosophers,
+                "meta_rank": meta_pos.get(idx),
+                # 命中的注解 = 查询实体 ∩ 块注解（不是块的全部注解）：
+                # 前端据此区分「这次答案用到的标签」与「块的背景标签」
+                "matched_concepts": sorted(q_conc & set(c.concepts)),
+                "matched_philosophers": sorted(q_phil & set(c.philosophers)),
             }
         )
 
@@ -340,6 +374,7 @@ def quote_search(
     school: str | None = None,
     unit: str | None = None,
     volume: str | None = None,
+    axis: str | None = None,
     speaker: str | list[str] | None = None,
     keyword: str | None = None,
     top_k: int = 20,
@@ -351,6 +386,7 @@ def quote_search(
         召回高，适合「找出书中所有谈拉康的引文」；
       * `speaker` —— **说话人**：只认有引述标记的归因（见 ingest.find_speaker），
         精度高但覆盖低，适合「拉康原话」。
+    `axis` 是四层坐标过滤（如 场域论=2），来自 chunk.coords，依赖新版注解索引。
     结果按「与查询理论家的关系远近」分档排序：说话人 → 引文正文提及 → 语境相关。
     """
     plist = _as_list(philosopher)
@@ -361,6 +397,7 @@ def quote_search(
         school=school,
         unit=unit,
         volume=volume,
+        axis=axis,
         chunk_type="quote",
     )
     slist = _as_list(speaker)

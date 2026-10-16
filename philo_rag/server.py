@@ -252,13 +252,14 @@ def create_app(cfg: dict) -> FastAPI:
         school: str | None = None,
         unit: str | None = None,
         volume: str | None = None,
+        axis: str | None = None,
         keyword: str | None = None,
         limit: int = 30,
     ) -> dict:
         store, lex = rt.store, rt.lex
         return quote_payload(
             store, lex, philosopher=philosopher, speaker=speaker, concept=concept,
-            era=era, school=school, unit=unit, volume=volume,
+            era=era, school=school, unit=unit, volume=volume, axis=axis,
             keyword=keyword, top_k=limit,
         )
 

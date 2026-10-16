@@ -32,7 +32,9 @@ chunk:
   quote_min_chars: 12       # ASCII 直引号成对抽取的最小长度（滤掉术语强调）
   quote_min_chars_reliable: 6  # 「」/“” 可靠标记的最小长度（可放宽）
   keep_footnotes: true      # 脚注单独成块
-  enrich_embed_text: true   # 向量/BM25 的输入 = 章节路径 + 元数据标签 + 正文
+  enrich_embed_text: true   # 向量/BM25 的输入 = 章节路径 + 坐标 + 元数据标签 + 正文
+  embed_tags_max: 24        # 进检索文本的标签数上限（0 = 不限）；防词表扩容后标签淹没正文
+                            # 注意：章节级注解（section_*，推断层）不进检索文本
 
 # ---------- 4. 向量化 ----------
 embedding:
@@ -55,6 +57,12 @@ retrieval:
   sparse_weight: 1.0        # 稀疏路权重
   entity_boost: 0.004       # 查询实体被块元数据命中时的加分（消除 RRF 平票）
   definition_boost: 0.02    # 问「什么是 X」时，块内出现 X 定义句式的加分
+  # 元数据通道：把「查询实体 ∩ 块注解」做成一路排名并入 RRF（比 entity_boost 强得多）。
+  # 0 = 关闭（默认，保持基线不变）；开启请先 `build` 重建索引并复跑 `eval` 对比
+  # Hit@1 / MRR，建议从 0.3–0.5 试起。section_* 是推断注解，按权重打折计入。
+  meta_weight: 0.0
+  meta_top_k: 40            # 元数据通道候选数
+  meta_section_weight: 0.5  # 章节级（推断）注解命中在元数据通道里的半权重折扣
   final_top_k: 8            # 最终返回条数
   expand_query: true        # 用词典做查询扩展（术语 → 别名 / 外文名）
   rerank: true              # true 需 sentence-transformers 的 CrossEncoder 与本地重排模型

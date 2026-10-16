@@ -207,7 +207,7 @@ def cmd_quote(cfg: dict, args: argparse.Namespace) -> None:
     res = quote_payload(
         store, lex,
         philosopher=args.philosopher, concept=args.concept, era=args.era,
-        school=args.school, unit=args.unit, volume=args.volume,
+        school=args.school, unit=args.unit, volume=args.volume, axis=args.axis,
         speaker=args.speaker, keyword=args.keyword, top_k=args.limit,
     )
     _emit("quote", res, args, cfg)
@@ -321,6 +321,7 @@ def _add_filters(p: argparse.ArgumentParser) -> None:
     p.add_argument("--school", help="限定流派")
     p.add_argument("--unit", help="限定数值单元编号（如 1-1 / 3-2-1，或字头 1）")
     p.add_argument("--volume", help="限定卷（如 '第 1 卷 实在论'）")
+    p.add_argument("--axis", help="限定四层坐标（如 场域论=2 / 本体论=3），需新版注解索引")
 
 
 def main(argv: list[str] | None = None) -> None:
