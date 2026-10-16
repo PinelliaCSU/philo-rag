@@ -24,7 +24,8 @@ def test_canonical_field_set_is_stable():
     assert set(cit._FIELDS) == {
         "chunk_id", "citation", "chapter_path", "unit", "unit_title", "volume",
         "char_span", "start", "end", "page", "chunk_type", "philosophers",
-        "concepts", "eras", "text", "score",
+        "concepts", "eras", "coords", "section_concepts", "section_philosophers",
+        "matched_concepts", "matched_philosophers", "text", "score",
     }
 
 

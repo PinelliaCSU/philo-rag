@@ -3,12 +3,13 @@
 存储格式（store/ 目录，全部为可读文件，便于人工核对与增量更新）：
   chunks.jsonl    每个知识块一行（含全部元数据）
   vectors.npy     与 chunks 行序对齐的稠密向量
-  terms.json      概念 / 哲学家 / 年代 / 流派 → chunk_id 倒排表
-  manifest.json   构建信息（doc_id、标题、嵌入后端、块数、构建时间）
+  terms.json      概念 / 哲学家 / 年代 / 流派 / 坐标 → chunk_id 倒排表
+  manifest.json   构建信息（doc_id、标题、嵌入后端、块数、注解版本、构建时间）
 """
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ from .embed import get_embedder
 from .ingest import build_document
 from .lexicon import Lexicon
 from .schema import Chunk
+
+# 注解结构版本：坐标（coords）/章节级注解（section_*）/别名守卫（lexicon guard）。
+# 旧索引缺这些字段时提示重建——注解变了而索引没重建，检索结果会与词典对不上。
+ANNOTATION_VERSION = 2
 
 
 def tokenize(text: str) -> list[str]:
@@ -44,6 +49,7 @@ class Store:
         self.tokenized: list[list[str]] = []
         self.bm25: BM25Okapi | None = None
         self.enrich: bool = True
+        self.tags_max: int = 0
         self.terms: dict[str, dict[str, list[str]]] = {
             "concept": {},
             "philosopher": {},
@@ -51,12 +57,15 @@ class Store:
             "school": {},
             "unit": {},
             "volume": {},
+            "axis": {},
+            "section_concept": {},
+            "section_philosopher": {},
         }
         self.manifest: dict[str, Any] = {}
 
     def _index_texts(self) -> list[str]:
-        """进入向量/BM25 的文本：默认把章节路径与元数据标签一并编码。"""
-        return [c.embed_text() if self.enrich else c.text for c in self.chunks]
+        """进入向量/BM25 的文本：默认把章节路径、坐标与元数据标签一并编码。"""
+        return [c.embed_text(self.tags_max) if self.enrich else c.text for c in self.chunks]
 
     # ---------------- 构建 ----------------
 
@@ -73,6 +82,7 @@ class Store:
         chunks, title = build_document(source, doc_cfg["id"], lex, cfg["chunk"])
         st.chunks = chunks
         st.enrich = bool(cfg["chunk"].get("enrich_embed_text", True))
+        st.tags_max = int(cfg["chunk"].get("embed_tags_max", 0))
 
         embedder = get_embedder(cfg["embedding"], cfg.get("_root"))
         st.vectors = embedder.encode(st._index_texts())
@@ -91,6 +101,8 @@ class Store:
             "embedding_model": cfg["embedding"].get("model", ""),
             "vector_dim": int(st.vectors.shape[1]),
             "enrich_embed_text": st.enrich,
+            "embed_tags_max": st.tags_max,
+            "annotation_version": ANNOTATION_VERSION,
             "built_at": datetime.now().isoformat(timespec="seconds"),
         }
         return st
@@ -106,6 +118,9 @@ class Store:
             "school": {},
             "unit": {},
             "volume": {},
+            "axis": {},
+            "section_concept": {},
+            "section_philosopher": {},
         }
         for c in self.chunks:
             for p in c.philosophers:
@@ -117,12 +132,19 @@ class Store:
                 terms["concept"].setdefault(concept, []).append(c.chunk_id)
             for era in c.eras:
                 terms["era"].setdefault(era, []).append(c.chunk_id)
-            # 体系结构：数值单元（含全部上位单元）与卷
+            # 体系结构：数值单元（含全部上位单元）、卷、四层坐标
             for code in c.unit_codes():
                 terms["unit"].setdefault(code, []).append(c.chunk_id)
             vol = c.volume()
             if vol:
                 terms["volume"].setdefault(vol, []).append(c.chunk_id)
+            for coord in c.coords:
+                terms["axis"].setdefault(coord, []).append(c.chunk_id)
+            # 章节级（推断）注解：与块级注解分表存放，检索侧可区别加权
+            for t in c.section_concepts:
+                terms["section_concept"].setdefault(t, []).append(c.chunk_id)
+            for t in c.section_philosophers:
+                terms["section_philosopher"].setdefault(t, []).append(c.chunk_id)
         self.terms = terms
 
     # ---------------- 持久化 ----------------
@@ -149,7 +171,14 @@ class Store:
         with open(store_dir / "manifest.json", encoding="utf-8") as f:
             st.manifest = json.load(f)
         st.enrich = bool(st.manifest.get("enrich_embed_text", True))
+        st.tags_max = int(st.manifest.get("embed_tags_max", 0))
         st._build_lexical(lex)
+        if int(st.manifest.get("annotation_version", 1)) < ANNOTATION_VERSION:
+            print(
+                f"[philo-rag] 索引缺少新版注解（坐标 / 章节级注解）：{store_dir}\n"
+                f"            运行 `python -m philo_rag.cli build` 重建后生效。",
+                file=sys.stderr,
+            )
         return st
 
     # ---------------- 过滤 ----------------
@@ -163,6 +192,7 @@ class Store:
         chunk_type: str | None = None,
         unit: str | None = None,
         volume: str | None = None,
+        axis: str | None = None,
     ) -> set[str] | None:
         """按元数据取交集，返回允许的 chunk_id 集合；无过滤条件时返回 None。"""
         sets: list[set[str]] = []
@@ -183,6 +213,9 @@ class Store:
             sets.append(set(self.terms["unit"].get(unit, [])))
         if volume:
             sets.append(set(self.terms["volume"].get(volume, [])))
+        if axis:
+            # 四层坐标（如 场域论=2 / 本体论=3），来自 chunk.coords
+            sets.append(set(self.terms["axis"].get(axis, [])))
         if chunk_type:
             sets.append({c.chunk_id for c in self.chunks if c.chunk_type == chunk_type})
 

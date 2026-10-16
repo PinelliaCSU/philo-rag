@@ -314,6 +314,8 @@ function renderAnswer(r) {
 function citeCard(c) {
   const ph = (c.philosophers || []).map(x => `<span class="tag">${esc(x)}</span>`).join('');
   const cc = (c.concepts || []).map(x => `<span class="tag">${esc(x)}</span>`).join('');
+  /* 四层坐标注解（场域论=2 等）：结构维度，颜色比概念标签淡一档 */
+  const cd = (c.coords || []).map(x => `<span class="tag tag-coord">${esc(x)}</span>`).join('');
   const head = c.unit ? `<span class="unit">${esc(c.unit)}</span> ${esc(c.unit_title || '')}` : '';
   const n = c.n ?? '';
   const text = c.text || '';
@@ -321,7 +323,7 @@ function citeCard(c) {
   const truncated = text.length >= 1200;
   return `<div class="cite" id="cite-${esc(n)}">
     <div class="meta"><b>[${n}]</b> ${esc(c.citation)}</div>
-    <div class="cite-tags">${head} ${ph}${cc}</div>
+    <div class="cite-tags">${head} ${cd}${ph}${cc}</div>
     <div class="body cite-body" data-truncated="${truncated ? 1 : 0}" data-loaded="0">${esc(text)}</div>
     <div class="foot">
       <button class="ghost cite-toggle" data-toggle="${esc(n)}">${truncated ? '展开全文' : '收起'}</button>

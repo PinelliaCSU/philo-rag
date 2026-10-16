@@ -38,6 +38,9 @@ class Chunk:
     concepts: list[str] = field(default_factory=list)
     eras: list[str] = field(default_factory=list)
     speaker: str = ""                             # 引文的说话人
+    coords: list[str] = field(default_factory=list)             # 四层坐标注解（场域论=2 …）
+    section_concepts: list[str] = field(default_factory=list)   # 章节级概念（同单元 ≥2 块命中）
+    section_philosophers: list[str] = field(default_factory=list)
     char_len: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,20 +76,26 @@ class Chunk:
                 return p
         return ""
 
-    def embed_text(self) -> str:
-        """用于向量化与 BM25 的文本 = 章节路径 + 元数据标签 + 正文。
+    def embed_text(self, max_tags: int = 0) -> str:
+        """用于向量化与 BM25 的文本 = 结构路径 + 坐标 + 元数据标签 + 正文。
 
         正文保持纯净（用于展示与引用），但检索时把结构信息一并编码进去，
         这样「康德」「宋明理学」这类结构性词面才能命中整节内容。
+        max_tags > 0 时截断标签数，防止词表扩容后标签在检索文本里盖过正文；
+        章节级注解（section_*，属于推断注解）不进检索文本，只服务元数据通道。
         """
         head: list[str] = []
         if self.chapter_path:
             head.append(" / ".join(self.chapter_path))
+        if self.coords:
+            head.append("坐标：" + "｜".join(self.coords))
         tags: list[str] = []
-        if self.philosophers:
-            tags.append("哲学家：" + "、".join(self.philosophers))
-        if self.concepts:
-            tags.append("概念：" + "、".join(self.concepts))
+        phils = self.philosophers[:max_tags] if max_tags else self.philosophers
+        concepts = self.concepts[:max_tags] if max_tags else self.concepts
+        if phils:
+            tags.append("哲学家：" + "、".join(phils))
+        if concepts:
+            tags.append("概念：" + "、".join(concepts))
         if self.eras:
             tags.append("年代：" + "、".join(self.eras))
         if self.speaker:

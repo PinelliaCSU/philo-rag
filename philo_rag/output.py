@@ -137,12 +137,17 @@ def render_answer(res: dict[str, Any], fmt: str, cfg: dict[str, Any] | None = No
         for c in res["citations"]:
             who = "、".join(c["philosophers"]) or "—"
             con = "、".join(c["concepts"]) or "—"
-            out.append(
-                f"- **[{c['n']}]** {c['citation']}\n"
-                f"  - 单元：`{c['unit']}` {c.get('unit_title', '')}\n"
-                f"  - 理论家：{who}｜概念：{con}｜相关度：{c['score']}\n"
-                f"  - 原文：{c['text'][:160].replace(chr(10), ' ')}…"
-            )
+            lines = [f"- **[{c['n']}]** {c['citation']}"]
+            coords = c.get("coords") or []
+            if coords:
+                lines.append("  - 坐标：" + "｜".join(coords))
+            lines.append(f"  - 单元：`{c['unit']}` {c.get('unit_title', '')}")
+            lines.append(f"  - 理论家：{who}｜概念：{con}｜相关度：{c['score']}")
+            matched = [*(c.get("matched_concepts") or []), *(c.get("matched_philosophers") or [])]
+            if matched:
+                lines.append("  - 命中注解：" + "、".join(matched))
+            lines.append(f"  - 原文：{c['text'][:160].replace(chr(10), ' ')}…")
+            out.append("\n".join(lines))
     return "\n".join(out) + "\n"
 
 

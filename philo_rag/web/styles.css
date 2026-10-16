@@ -339,6 +339,12 @@ button.ghost:hover:not(:disabled) {
   color: var(--color-accent);
   font: 12px/1.8 var(--font-ui);
 }
+/* 四层坐标注解：结构维度，比概念标签淡一档 */
+.tag-coord {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
 .unit {
   display: inline-block;
   padding: 0;

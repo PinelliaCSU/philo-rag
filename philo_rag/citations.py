@@ -36,6 +36,11 @@ _FIELDS: dict[str, Any] = {
     "philosophers": [],
     "concepts": [],
     "eras": [],
+    "coords": [],
+    "section_concepts": [],
+    "section_philosophers": [],
+    "matched_concepts": [],
+    "matched_philosophers": [],
     "text": "",
     "score": 0.0,
 }
@@ -70,7 +75,11 @@ def group_citation(doc_title: str, unit: dict[str, Any], group: dict[str, Any]) 
 def citations_from_hits(
     hits: list[dict[str, Any]], doc_title: str, lex: Lexicon
 ) -> list[dict[str, Any]]:
-    """hybrid_search 的命中块 → 引用（含 char_span，供前端跳转原文并高亮）。"""
+    """hybrid_search 的命中块 → 引用（含 char_span，供前端跳转原文并高亮）。
+
+    matched_* 取命中记录里的「查询实体 ∩ 块注解」；块的全部注解仍在 concepts /
+    philosophers 里，两者语义不同，前端可以据此区分背景标签与本次命中。
+    """
     citations: list[dict[str, Any]] = []
     for n, h in enumerate(hits, start=1):
         c: Chunk = h["chunk"]
@@ -91,6 +100,11 @@ def citations_from_hits(
                 philosophers=c.philosophers,
                 concepts=c.concepts,
                 eras=c.eras,
+                coords=c.coords,
+                section_concepts=c.section_concepts,
+                section_philosophers=c.section_philosophers,
+                matched_concepts=h.get("matched_concepts", []),
+                matched_philosophers=h.get("matched_philosophers", []),
                 text=c.text,
                 score=round(float(h.get("score", 0.0)), 6),
             )

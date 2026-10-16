@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import collections
 import re
 from pathlib import Path
 
@@ -231,6 +232,7 @@ def fill_meta(chunk: Chunk, lex: Lexicon) -> None:
     chunk.philosophers = lex.match_philosophers(chunk.text)
     chunk.concepts = lex.match_concepts(chunk.text)
     chunk.eras = lex.eras_of(chunk.philosophers)
+    chunk.coords = lex.coords_of(chunk.unit_code())
     chunk.char_len = len(chunk.text)
 
 
@@ -478,6 +480,7 @@ def build_chunks(
     for i, c in enumerate(chunks, start=1):
         c.seq = i
         c.chunk_id = f"{doc_id}#c{i:05d}"
+    _apply_section_tags(chunks)
     return chunks
 
 
@@ -510,3 +513,35 @@ def build_document(path: Path, doc_id: str, lex: Lexicon, cfg: dict) -> tuple[li
     if not title:
         title = path.stem
     return build_chunks(blocks, doc_id, lex, cfg, full_text, page_index), title
+
+
+# --------------------------------------------------------------------------- #
+# 6. 章节级注解（推断注解，与块级精确注解分层存放）
+# --------------------------------------------------------------------------- #
+SECTION_TAG_MIN = 2     # 同单元内至少这么多块命中，才视为章节级标签
+SECTION_TAG_MAX = 24    # 单块最多继承多少个章节标签
+
+
+def _apply_section_tags(chunks: list[Chunk]) -> None:
+    """给每块补「章节级」注解：同一（最细）单元内 ≥2 块命中的标签，扣除本块自身的。
+
+    为什么单独一层：块级 concepts/philosophers 是精确命中，能进倒排索引与实体加权、
+    也能作为引用卡片上的证据；章节标签是**推断**（兄弟块的共识），只用于扩大召回
+    （「这一节整体在谈什么」），不能冒充原文证据，所以分成 section_* 字段。
+    """
+    groups: dict[str, list[Chunk]] = {}
+    for c in chunks:
+        key = c.unit_code() or " / ".join(c.chapter_path) or "（前言）"
+        groups.setdefault(key, []).append(c)
+
+    for items in groups.values():
+        if len(items) < SECTION_TAG_MIN:
+            continue
+        con = collections.Counter(x for c in items for x in c.concepts)
+        phi = collections.Counter(x for c in items for x in c.philosophers)
+        shared_c = [t for t, n in con.most_common() if n >= SECTION_TAG_MIN]
+        shared_p = [t for t, n in phi.most_common() if n >= SECTION_TAG_MIN]
+        for c in items:
+            own_c, own_p = set(c.concepts), set(c.philosophers)
+            c.section_concepts = [t for t in shared_c if t not in own_c][:SECTION_TAG_MAX]
+            c.section_philosophers = [t for t in shared_p if t not in own_p][:SECTION_TAG_MAX]
