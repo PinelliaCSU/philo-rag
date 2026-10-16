@@ -9,6 +9,7 @@
 #   era     思想史阶段（写入 chunk.eras，用于「按年代检索」）
 #   school  流派归属（用于「按流派检索」）
 philosophers:
+
   # ---------- 德国观念论（全书核心，3-2 卷主轴）----------
   - name: 康德
     aliases: [Kant, 伊曼努尔·康德]
@@ -40,18 +41,6 @@ philosophers:
     death: 1843
     era: 德国观念论
     school: 德国观念论
-  - name: 雅可比
-    aliases: [Jacobi]
-    birth: 1743
-    death: 1819
-    era: 德国观念论
-    school: 德国观念论
-  - name: 诺瓦利斯
-    aliases: [Novalis]
-    birth: 1772
-    death: 1801
-    era: 德国浪漫派
-    school: 浪漫主义
   - name: 施莱尔马赫
     aliases: [Schleiermacher]
     birth: 1768
@@ -124,12 +113,6 @@ philosophers:
     aliases: [Copernicus, 哥白尼]
     birth: 1473
     death: 1543
-    era: 近代早期
-    school: 近代科学
-  - name: 开普勒
-    aliases: [Kepler]
-    birth: 1571
-    death: 1630
     era: 近代早期
     school: 近代科学
 
@@ -340,12 +323,6 @@ philosophers:
     death: 1990
     era: 20世纪
     school: 结构主义马克思主义
-  - name: 普兰查斯
-    aliases: [Poulantzas]
-    birth: 1936
-    death: 1979
-    era: 20世纪
-    school: 结构主义马克思主义
 
   # ---------- 现象学 · 存在主义 ----------
   - name: 胡塞尔
@@ -422,24 +399,12 @@ philosophers:
     death: 1960
     era: 20世纪
     school: 精神分析
-  - name: 温尼科特
-    aliases: [Winnicott]
-    birth: 1896
-    death: 1971
-    era: 20世纪
-    school: 精神分析
   - name: 荣格
     aliases: [Jung, 卡尔·荣格]
     birth: 1875
     death: 1961
     era: 20世纪
     school: 分析心理学
-  - name: 赖希
-    aliases: [Reich, 威廉·赖希]
-    birth: 1897
-    death: 1957
-    era: 20世纪
-    school: 精神分析
   - name: 米勒
     aliases: [Miller, 雅克-阿兰·米勒]
     birth: 1944
@@ -496,18 +461,6 @@ philosophers:
     death: 0
     era: 当代
     school: 当代法国哲学
-  - name: 阿甘本
-    aliases: [Agamben, 吉奥乔·阿甘本]
-    birth: 1942
-    death: 0
-    era: 当代
-    school: 当代意大利哲学
-  - name: 奈格里
-    aliases: [Negri, 安东尼奥·奈格里]
-    birth: 1933
-    death: 2023
-    era: 当代
-    school: 自治主义
   - name: 哈特
     aliases: [Hardt, 迈克尔·哈特]
     birth: 1960
@@ -526,12 +479,6 @@ philosophers:
     death: 2014
     era: 当代
     school: 后马克思主义
-  - name: 墨菲
-    aliases: [Mouffe, 尚塔尔·墨菲]
-    birth: 1943
-    death: 0
-    era: 当代
-    school: 后马克思主义
   - name: 巴特勒
     aliases: [Butler, 朱迪斯·巴特勒]
     birth: 1956
@@ -541,12 +488,6 @@ philosophers:
   - name: 科耶夫
     aliases: [Kojève, 亚历山大·科耶夫]
     birth: 1902
-    death: 1968
-    era: 20世纪
-    school: 法国黑格尔主义
-  - name: 伊波利特
-    aliases: [Hyppolite]
-    birth: 1907
     death: 1968
     era: 20世纪
     school: 法国黑格尔主义
@@ -575,18 +516,6 @@ philosophers:
     birth: 1908
     death: 2000
     era: 20世纪
-    school: 分析哲学
-  - name: 戴维森
-    aliases: [Davidson]
-    birth: 1917
-    death: 2003
-    era: 20世纪
-    school: 分析哲学
-  - name: 克里普克
-    aliases: [Kripke]
-    birth: 1940
-    death: 0
-    era: 当代
     school: 分析哲学
   - name: 普特南
     aliases: [Putnam]
@@ -646,24 +575,6 @@ philosophers:
     aliases: [Kuhn, 托马斯·库恩]
     birth: 1922
     death: 1996
-    era: 20世纪
-    school: 科学哲学
-  - name: 波普尔
-    aliases: [Popper, 卡尔·波普尔]
-    birth: 1902
-    death: 1994
-    era: 20世纪
-    school: 科学哲学
-  - name: 拉卡托斯
-    aliases: [Lakatos]
-    birth: 1922
-    death: 1974
-    era: 20世纪
-    school: 科学哲学
-  - name: 费耶阿本德
-    aliases: [Feyerabend]
-    birth: 1924
-    death: 1994
     era: 20世纪
     school: 科学哲学
   - name: 纽拉特
@@ -748,21 +659,9 @@ philosophers:
     death: 1979
     era: 20世纪
     school: 社会学
-  - name: 卢曼
-    aliases: [Luhmann, 尼克拉斯·卢曼]
-    birth: 1927
-    death: 1998
-    era: 20世纪
-    school: 系统论社会学
   - name: 哈贝马斯
     aliases: [Habermas, 尤尔根·哈贝马斯]
     birth: 1929
-    death: 0
-    era: 当代
-    school: 法兰克福学派
-  - name: 霍耐特
-    aliases: [Honneth]
-    birth: 1949
     death: 0
     era: 当代
     school: 法兰克福学派
@@ -778,22 +677,10 @@ philosophers:
     death: 2002
     era: 20世纪
     school: 政治哲学
-  - name: 诺齐克
-    aliases: [Nozick]
-    birth: 1938
-    death: 2002
-    era: 20世纪
-    school: 政治哲学
   - name: 卢梭
     aliases: [Rousseau]
     birth: 1712
     death: 1778
-    era: 近代早期
-    school: 政治哲学
-  - name: 孟德斯鸠
-    aliases: [Montesquieu]
-    birth: 1689
-    death: 1755
     era: 近代早期
     school: 政治哲学
   - name: 亚当·斯密
@@ -834,24 +721,12 @@ philosophers:
     death: -286
     era: 战国
     school: 道家
-  - name: 荀子
-    aliases: [荀况, 孙卿, Xunzi]
-    birth: -313
-    death: -238
-    era: 战国
-    school: 儒家
   - name: 王阳明
     aliases: [王守仁, 阳明先生, Wang Yangming]
     birth: 1472
     death: 1529
     era: 宋明理学
     school: 心学
-  - name: 朱熹
-    aliases: [朱子, 晦庵, Zhu Xi]
-    birth: 1130
-    death: 1200
-    era: 宋明理学
-    school: 理学
 
   # ---------- 补录：语料高频但易漏（依据引述动词前人名挖掘）----------
   - name: 马赫
@@ -1184,3 +1059,9 @@ philosophers:
       compounds: [乔达摩]                       # 「达摩」是「乔达摩」的子串，须整体排除
     era: 古印度
     school: 禅宗
+
+  # ---------- 移除记录（2026-10 复核）----------
+  # 下列条目在全书语料中零命中（标准名与全部别名逐词面取证，出现次数均为 0），
+  # 依「只收语料有实据者、不凭通行哲学史补录」的口径移除；待语料扩充后如需
+  # 恢复，从本清单取回即可：
+  #   雅可比、诺瓦利斯、开普勒、普兰查斯、温尼科特、赖希、阿甘本、奈格里、墨菲、伊波利特、戴维森、克里普克、波普尔、拉卡托斯、费耶阿本德、卢曼、霍耐特、诺齐克、孟德斯鸠、荀子、朱熹

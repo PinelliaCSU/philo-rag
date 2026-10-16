@@ -15,7 +15,10 @@
 concepts:
   # ====================== 一、哲学大纲体系自身 ======================
   - name: 字头
-    aliases: [首位数字, 一字头, 二字头, 三字头, 四字头, 头一个字]
+    # 「一字头」等四个词面归各字头概念自身（见 形而下学 / 形而上学 / 观念论 / 实践）：
+    # 同一词面被两个词条登记时，只有先注册者能命中（lexicon._iter_alias_hits 占用区间），
+    # 曾导致 二字头/三字头/四字头 全部标成「字头」，具体字头概念拿不到命中。
+    aliases: [首位数字, 头一个字]
     definition: 哲学大纲四位编号的首位数字，1 形而下学、2 形而上学、3 观念论、4 实践，决定体系的总体姿态
   - name: 场域论
     aliases: [场域, 场论, 场域层]
@@ -31,7 +34,7 @@ concepts:
     aliases: [teleology, 目的层, 合目的性]
     definition: 四位编号的第四位，规定体系所指向的终极目标或运动方向（无脑循环、上升、解放等）
   - name: 形而下学
-    aliases: [实在论, Subphysics, Underphysics, Prephysics, realism, 天真实在论]
+    aliases: [实在论, Subphysics, Underphysics, Prephysics, realism, 天真实在论, 一字头]
     definition: 一字头，尚未拥有自身本体论与自然学的状态；默认存在一个融贯均匀的场，一切皆可被对象化定位
   - name: 形而上学
     aliases: [metaphysics, 二字头]
@@ -119,7 +122,7 @@ concepts:
     philosopher: 阿尔都塞
     definition: 社会整体的诸矛盾由结构主导并被多重决定；经济「归根到底」起决定作用但非唯一决定
   - name: 意识形态
-    aliases: [ideology, 意识形态批判]
+    aliases: [ideology]
     philosopher: 马克思
     definition: 再生产统治关系的观念与实践系统；阿尔都塞强调其物质性与对主体的质询功能
   - name: 意识形态国家机器
@@ -164,10 +167,6 @@ concepts:
     aliases: [先天综合判断, synthetic a priori]
     philosopher: 康德
     definition: 既不依赖经验又能扩展知识的判断，是形而上学作为科学如何可能的根据
-  - name: 绝对命令
-    aliases: [定言命令, categorical imperative]
-    philosopher: 康德
-    definition: 无条件有效的道德法则，要求准则能够成为普遍立法
   - name: 二律背反
     aliases: [antinomy, 二律背反]
     philosopher: 康德
@@ -264,7 +263,7 @@ concepts:
     philosopher: 列宁
     definition: 资本主义的垄断阶段；资本输出、金融资本统治与列强瓜分世界构成其基本特征
   - name: 意识形态批判
-    aliases: [ideology critique, 意识形态批判]
+    aliases: [ideology critique]
     philosopher: 马克思
     definition: 揭示观念系统如何服务于统治关系再生产、并把历史性产物自然化的分析工作
   - name: 历史唯物主义
@@ -373,10 +372,6 @@ concepts:
     aliases: [神圣光照, illumination]
     philosopher: 奥古斯丁
     definition: 人的心灵需借助上帝之光的照耀才能把握永恒真理
-  - name: 恩典
-    aliases: [grace, 神恩]
-    philosopher: 奥古斯丁
-    definition: 上帝无偿赐予的救助，是意志从罪中转向善的必要条件
   - name: 单子
     aliases: [monad, 单子论]
     philosopher: 莱布尼茨
@@ -393,10 +388,6 @@ concepts:
     aliases: [因果性联想, custom, habit]
     philosopher: 休谟
     definition: 因果关系只是由恒常会合产生的心理习惯，非理性所能证明
-  - name: 是—应当问题
-    aliases: [休谟法则, is-ought problem, 事实与价值]
-    philosopher: 休谟
-    definition: 从事实判断不能逻辑地推出价值判断
   - name: 仁
     aliases: [ren, 仁爱, 爱人]
     philosopher: 孔子
@@ -421,14 +412,6 @@ concepts:
     aliases: [性善论, 四端]
     philosopher: 孟子
     definition: 人天生具有恻隐、羞恶、辞让、是非四端，为仁义礼智之萌芽
-  - name: 化性起伪
-    aliases: [性恶论, 伪, 人为]
-    philosopher: 荀子
-    definition: 人之本性好利疾恶，善是后天人为教化与礼法约束的结果
-  - name: 格物致知
-    aliases: [格物, 即物穷理]
-    philosopher: 朱熹
-    definition: 即事物而穷究其理，积久贯通以达豁然贯通之知
   - name: 致良知
     aliases: [良知, 知行合一]
     philosopher: 王阳明
@@ -761,3 +744,17 @@ concepts:
   - name: 阿赖耶识
     aliases: [ālaya-vijñāna, 藏识]               # 19 次
     definition: 唯识学第八识：含藏一切种子、为万法所依；与先验主体性有近似结构
+
+# ============================================================================
+# 移除记录（2026-10 复核：全篇语料逐词面取证，出现次数为 0）
+#
+#   绝对命令     —— 别名 定言命令 / categorical imperative 全书 0 次
+#   恩典         —— 别名 grace / 神恩 全书 0 次
+#   是—应当问题  —— 别名 休谟法则 / 事实与价值 全书 0 次
+#   格物致知     —— 别名 格物 / 即物穷理 全书 0 次
+#   化性起伪     —— 名字与 性恶论 全书 0 次，仅靠「伪 / 人为」这类通用词命中，
+#                   实测把 114 个无关块误标成该概念
+#
+# 口径与 philosophers.yaml 一致：只收语料有实据的词，不凭通行哲学史补录；
+# 待语料扩充后如需恢复，从本记录取回即可。
+# ============================================================================
