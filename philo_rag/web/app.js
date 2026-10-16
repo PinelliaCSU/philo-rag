@@ -253,6 +253,9 @@ function openPanel(kind) {
     const q = $('#concept-q');
     if (q && !q.value) q.focus();
   }
+  // 三个面板共用一个滚动容器：不复位的话，从「检索结果第 N 页」切到地图会落在中段
+  const body = $('#panel .panel-body');
+  if (body) body.scrollTop = 0;
 }
 
 /* 旧的三视图切换调用点（askQuestion / data-toquote）保持兼容 */
@@ -427,9 +430,21 @@ async function toggleCite(btn) {
   refreshCiteToggle(citeEl);
 }
 
+/* 同一时刻只保留最新一条提问流。流式期间示例、澄清选项、地图入口都还能点，
+   没有这个序号，旧流的 done 会用旧 meta 重新渲染，把新答案覆盖掉；
+   state.ask / citePage 也会被两股流轮流重置。 */
+let askSeq = 0;
+let askAbort = null;
+
 async function doAsk(q, strategy, focus) {
   const strat = strategy || state.strategy;
   const out = $('#ask-out');
+  const seq = ++askSeq;
+  if (askAbort) askAbort.abort();
+  const ac = new AbortController();
+  askAbort = ac;
+  const stale = () => seq !== askSeq;
+
   out.innerHTML = '<div class="card muted">检索并生成中… <b id="ask-t">0.0s</b></div>';
   $('#cite-cards').innerHTML = '<div class="muted">—</div>';
   $('#cite-pager').innerHTML = '';
@@ -441,6 +456,7 @@ async function doAsk(q, strategy, focus) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q, strategy: strat, focus }),
+      signal: ac.signal,
     });
     if (!r.ok) throw new Error(await errText(r));
 
@@ -455,6 +471,7 @@ async function doAsk(q, strategy, focus) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (stale()) return;   // 已被新提问接管：停止消费这条流
       buf += decoder.decode(value, { stream: true });
       // SSE 事件以 \n\n 分隔
       let idx;
@@ -511,6 +528,7 @@ async function doAsk(q, strategy, focus) {
     // 如果没有收到任何事件（如网关跳过），回退到旧接口
     if (!meta) {
       const r2 = await jpost('/api/ask', { question: q, strategy: strat, focus });
+      if (stale()) return;
       state.ask = r2;
       state.citePage = 0;
       if (r2.strategy === 'clarify') {
@@ -523,10 +541,11 @@ async function doAsk(q, strategy, focus) {
       }
     }
   } catch (e) {
+    if (stale()) return;   // 旧请求被 abort() 打断属正常路径，不报错
     out.innerHTML = `<div class="err">${esc(e.message)}</div>`;
   } finally {
     clearInterval(tick);
-    $('#ask-btn').disabled = false;
+    if (!stale()) $('#ask-btn').disabled = false;
   }
 }
 
@@ -915,7 +934,7 @@ function selectMapUnit(code) {
     return;
   }
   const h = headIndex(u.code);
-  const l = layerIndex(u.code);
+  const l = layerIndex(u);   // 传单元对象：传 code 会退化成「场域论」
   box.innerHTML = `<div class="row map-detail-head"><h3>${esc(u.code)} ${esc(u.title || '')}</h3></div>
     <div class="muted">卷：${esc(u.volume || '—')}　字头：${esc(HEAD_NAMES[h] || '—')}　位面：${esc(LAYER_NAMES[l - 1] || '—')}</div>
     <div class="term-actions"><button class="ghost" data-unit-ask="${esc(u.code)}">用该单元提问</button></div>`;

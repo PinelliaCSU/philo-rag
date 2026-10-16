@@ -567,8 +567,9 @@ button.ghost:hover:not(:disabled) {
   border-bottom: var(--border-width) solid var(--color-border);
 }
 .panel-head h3 { margin: 0; font-size: 15px; font-weight: 500; }
-.panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 22px 32px; }
-.panel-pane { display: none; }
+/* 底部留白放在各面板而不是滚动容器上：否则贴底的 sticky 详情条下方会漏出一条内容 */
+.panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 22px; }
+.panel-pane { display: none; padding-bottom: 32px; }
 .panel-pane.on { display: block; }
 
 /* 概念卡侧栏 */
@@ -703,7 +704,17 @@ button.ghost:hover:not(:disabled) {
 .map-cell .map-unit .unit { display: inline; margin: 0 5px 0 0; }
 .map-cell .map-unit > span:nth-child(2) { flex: 1 1 auto; min-width: 0; }
 .map-note { margin-top: 9px; }
-.map-detail { padding-block: 20px; }
+/* 单元详情钉在面板底部：点单元后不必先滚到 4×4 网格末尾才看得到信息 */
+.map-detail {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-block: 14px;
+  border-top: var(--border-width) solid var(--color-text);
+  border-bottom: 0;
+  background: var(--color-surface);
+}
+.map-detail:empty { display: none; }
 .map-detail-head h3 { margin: 0; font-size: 17px; font-weight: 500; }
 
 /* 原文上下文：明确焦点块，其他证据保持朴素。 */
@@ -777,7 +788,8 @@ button.ghost:hover:not(:disabled) {
   .grid, .axis-card .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
   .chip { font-size: 12px; }
   .panel { width: 100%; }
-  .panel-body { padding-inline: 14px; padding-bottom: 24px; }
+  .panel-body { padding-inline: 14px; }
+  .panel-pane { padding-bottom: 24px; }
   .concept-form { margin-top: 14px; }
   .map-grid { grid-template-columns: 62px repeat(4, minmax(0, 1fr)); }
   .map-colhead, .map-rowhead { padding: 7px 5px; }
