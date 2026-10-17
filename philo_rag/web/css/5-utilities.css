@@ -1,0 +1,19 @@
+/* 5-utilities.css — 工具层：.row .label .muted .meta .hidden .intro-note .heading-note 等单职责工具类 */
+
+/* 基础文本与控件 */
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+.label { color: var(--color-text-secondary); font: 12px/1.6 var(--font-ui); }
+
+.muted, .meta { color: var(--color-text-secondary); }
+
+.muted { font-size: 13px; line-height: 1.75; }
+
+.meta { font: 12px/1.65 var(--font-ui); }
+
+.intro-note { margin: 0; }
+
+.heading-note { font-weight: 400; }
+
+.hidden { display: none !important; }

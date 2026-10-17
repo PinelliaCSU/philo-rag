@@ -1,0 +1,39 @@
+/* 1-tokens.css — 变量层：只放 :root 自定义属性（color-scheme / 颜色 / 字体 / 间距 / 圆角 / 边框宽度） */
+
+/* ==========================================================================
+   哲学大纲 · 知识库 —— 编辑式界面系统
+   以纸白、墨色与清楚的阅读层级呈现研究材料；装饰服从内容。
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --color-bg: #f7f6f2;
+  --color-surface: #fdfcf9;
+  --color-text: #252521;
+  --color-text-secondary: #706f68;
+  --color-border: #deddd5;
+  --color-accent: #8d3f32;
+  --color-accent-soft: #f2e9e5;
+  --color-danger: #8f342d;
+  --color-danger-soft: #f7ece9;
+
+  --font-body: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", serif;
+  --font-ui: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
+
+  --page-width: 1360px;
+  --reading-width: 760px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --border-width: 1px;
+}

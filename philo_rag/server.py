@@ -148,13 +148,23 @@ def create_app(cfg: dict) -> FastAPI:
     def index() -> str:
         return _read_web("index.html")
 
-    @app.get("/assets/styles.css")
-    def styles() -> Response:
-        return Response(_read_web("styles.css"), media_type="text/css; charset=utf-8")
+    @app.get("/assets/{path:path}")
+    def asset(path: str) -> Response:
+        """按 web/ 下的相对路径服务前端资源（css/*.css、js/*.js）。
 
-    @app.get("/assets/app.js")
-    def app_js() -> Response:
-        return Response(_read_web("app.js"), media_type="application/javascript; charset=utf-8")
+        原来是写死的两条路由（/assets/styles.css、/assets/app.js）；前端拆成多文件后，
+        新增的 css/ 与 js/ 子目录没有任何路由能服务，页面会取不到文件，因此改为按子路径透传。
+        只放行 .css/.js，并拒绝任何跳出 web/ 的路径（..、绝对路径），避免变成任意文件读取。
+        """
+        rel = Path(path)
+        if rel.is_absolute() or ".." in rel.parts or rel.suffix not in {".css", ".js"}:
+            raise HTTPException(404, f"资源不存在：{path}")
+        target = (_WEB_DIR / rel).resolve()
+        if _WEB_DIR.resolve() not in target.parents or not target.is_file():
+            raise HTTPException(404, f"资源不存在：{path}")
+        media = ("text/css; charset=utf-8" if rel.suffix == ".css"
+                 else "application/javascript; charset=utf-8")
+        return Response(target.read_text(encoding="utf-8"), media_type=media)
 
     @app.get("/favicon.ico")
     def favicon() -> Response:

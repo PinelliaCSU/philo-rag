@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>哲学大纲 · 知识库</title>
-<link rel="stylesheet" href="/assets/styles.css">
+<!-- 样式按层加载：顺序即层序（变量 → 基础 → 组件 → 布局 → 工具） -->
+<link rel="stylesheet" href="/assets/css/1-tokens.css">
+<link rel="stylesheet" href="/assets/css/2-base.css">
+<link rel="stylesheet" href="/assets/css/3-components.css">
+<link rel="stylesheet" href="/assets/css/4-layout.css">
+<link rel="stylesheet" href="/assets/css/5-utilities.css">
 </head>
 <body>
 
@@ -184,6 +189,21 @@
   </div>
 </div>
 
-<script src="/assets/app.js"></script>
+<!-- 逻辑按职责加载：顺序即依赖序（defer 保证按序执行且不阻塞解析） -->
+<script defer src="/assets/js/00-ns.js"></script>
+<script defer src="/assets/js/05-state.js"></script>
+<script defer src="/assets/js/08-api.js"></script>
+<script defer src="/assets/js/09-storage.js"></script>
+<script defer src="/assets/js/10-util.js"></script>
+<script defer src="/assets/js/30-render-answer.js"></script>
+<script defer src="/assets/js/35-ask-flow.js"></script>
+<script defer src="/assets/js/40-render-history.js"></script>
+<script defer src="/assets/js/45-render-search.js"></script>
+<script defer src="/assets/js/46-render-concept.js"></script>
+<script defer src="/assets/js/47-render-map.js"></script>
+<script defer src="/assets/js/50-render-compare.js"></script>
+<script defer src="/assets/js/60-render-read.js"></script>
+<script defer src="/assets/js/70-render-meta.js"></script>
+<script defer src="/assets/js/80-app.js"></script>
 </body>
 </html>

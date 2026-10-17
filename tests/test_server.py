@@ -145,9 +145,21 @@ def test_compare_endpoint_returns_two_sides(client):
 
 
 def test_static_assets_are_served(client):
+    """前端拆成 css/ 与 js/ 子目录后，资源按子路径服务。
+
+    旧的两条单文件路径必须 404——它们已随拆分删除，留着 200 会让人误以为还在单文件时代。
+    """
     assert client.get("/").status_code == 200
-    assert client.get("/assets/app.js").status_code == 200
-    assert client.get("/assets/styles.css").status_code == 200
+    assert client.get("/assets/css/1-tokens.css").status_code == 200
+    assert client.get("/assets/js/00-ns.js").status_code == 200
+    assert client.get("/assets/app.js").status_code == 404
+    assert client.get("/assets/styles.css").status_code == 404
+
+
+def test_asset_route_rejects_traversal_and_other_suffixes(client):
+    """通用资源路由只放行 web/ 下的 .css/.js，不能变成任意文件读取。"""
+    assert client.get("/assets/../config.yaml").status_code == 404
+    assert client.get("/assets/js/../index.html").status_code == 404
 
 
 # --------------------------------------------------------------------------- #

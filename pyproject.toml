@@ -30,7 +30,7 @@ packages = ["philo_rag"]
 
 # 前端静态资源随包分发（纯 HTML/CSS/JS，无构建步骤）
 [tool.setuptools.package-data]
-philo_rag = ["web/*.html", "web/*.css", "web/*.js"]
+philo_rag = ["web/*.html", "web/css/*.css", "web/js/*.js"]
 
 [tool.ruff]
 target-version = "py310"
