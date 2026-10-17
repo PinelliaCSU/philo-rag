@@ -393,6 +393,40 @@ button.ghost:hover:not(:disabled) {
 .ask-input-row input { background: var(--color-surface); }
 .ask-input-row button { min-width: 84px; background: var(--color-accent); border-color: var(--color-accent); }
 .ask-input-row button:hover:not(:disabled) { background: #763329; border-color: #763329; }
+/* 「新对话」是次要动作，压低到 ghost 档：否则两个主色按钮并排会分不清主次 */
+.ask-input-row button.ghost {
+  min-width: 0;
+  padding-inline: 13px;
+  border-color: var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+.ask-input-row button.ghost:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: transparent;
+  color: var(--color-accent);
+}
+
+/* 会话条：最近提问 chips 只回填输入框（会话真值在服务端，前端不做回滚） */
+.conv-row { margin-top: 10px; gap: 8px 10px; }
+.conv-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.conv-chip {
+  display: block;
+  max-width: 230px;
+  padding: 1px 9px;
+  border-bottom-color: transparent;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 追问改写提示：贴着回答卡上方，说明这句话被理解成了什么 */
+.rewrite-note {
+  margin: 0 0 9px;
+  padding-left: 9px;
+  border-left: 2px solid var(--color-border);
+  font-size: 12px;
+}
 
 .ask-body {
   flex: 1 1 auto;
@@ -540,6 +574,48 @@ button.ghost:hover:not(:disabled) {
 .bar { width: 70px; height: 2px; margin-top: 5px; overflow: hidden; background: #e9e7df; }
 .bar i { display: block; height: 100%; background: var(--color-accent); }
 .unit-card { min-height: 62px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
+
+/* 连续阅读：全宽视图。工具条贴顶，正文按阅读宽度居中，块之间用细分隔线分开。 */
+.read-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px clamp(24px, 4vw, 56px) 13px;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.read-title { flex: 1 1 260px; min-width: 0; font: 15px/1.6 var(--font-body); overflow-wrap: anywhere; }
+.read-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.read-bar button { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+.read-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: var(--reading-width);
+  margin-inline: auto;
+  padding: 20px clamp(24px, 4vw, 56px) 40px;
+  overflow-y: auto;
+  line-height: 2;
+}
+.read-block { padding: 16px 0; border-top: var(--border-width) solid var(--color-border); }
+.read-block:first-child { border-top: 0; }
+.read-text { margin-top: 6px; overflow-wrap: anywhere; }
+.read-block .foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.read-block .foot button { min-height: 30px; padding: 3px 9px; font-size: 12px; }
+/* 阅读视图里的术语链接不能用 .ans .term-link（容器不是 .ans），单独给一份 */
+.read-text .term-link {
+  display: inline;
+  padding: 0 1px;
+  border: 0;
+  border-bottom: 1px dotted var(--color-accent);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.read-text .term-link:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent); }
 
 /* 可召唤侧栏：概念卡 / 检索 / 体系地图共用一个右抽屉。 */
 .panel {
@@ -782,6 +858,62 @@ button.ghost:hover:not(:disabled) {
 }
 .note-edit:focus { outline: none; border-color: var(--color-accent); }
 
+/* 问答历史：整块是按钮（点即复原当次回答），底部才是收藏/删除 */
+.hist-item { margin-top: 12px; }
+.hist-main {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: 15px/1.65 var(--font-body);
+  text-align: left;
+}
+.hist-main:hover:not(:disabled) { background: transparent; color: var(--color-accent); }
+.hist-q { margin-bottom: 4px; overflow-wrap: anywhere; }
+.hist-item .foot { display: flex; gap: 9px; margin-top: 9px; }
+.hist-item .foot button { min-height: 30px; padding: 3px 9px; font-size: 12px; }
+button.ghost.on { border-color: var(--color-accent); color: var(--color-accent); }
+/* 回答卡 h3 右侧的「收藏本条回答」：float 不改变 h3 基线，避免正文下移 */
+.ans-pin { float: right; min-height: 0; padding: 2px 8px; font-size: 12px; font-weight: 400; }
+.cite-stub { color: var(--color-text-secondary); font-size: 13px; }
+
+/* 概念对比：三栏（定义与归属 / 共现与差异 / 引文），窄屏退化为单列 */
+.cmp-go-row { margin: 12px 0 4px; }
+.compare-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+.cmp-col { min-width: 0; }
+.cmp-col h4 {
+  margin: 0 0 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.cmp-side { padding: 10px 0 12px; border-top: var(--border-width) solid var(--color-border); }
+.cmp-col h4 + .cmp-side { border-top: 0; }
+.cmp-side h5 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.cmp-open { min-height: 0; padding: 1px 6px; font-size: 13px; }
+.cmp-def { margin: 4px 0 8px; font-size: 14px; line-height: 1.85; }
+.cmp-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; margin: 2px 0 8px; }
+.cmp-tags .chip { padding: 3px 0; border-bottom: 0; font-size: 12px; }
+.cmp-only { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+.cmp-quote { padding: 10px 0; border-top: var(--border-width) solid var(--color-border); }
+.cmp-quote .body { font-size: 13px; line-height: 1.8; }
+.cmp-quote .foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+.cmp-quote .foot button { min-height: 30px; padding: 3px 9px; font-size: 12px; }
+
 /* 相关概念 / 主题入口沿用 chip 语法，只把计数压淡一档 */
 .related-chip b,
 .theme-chip span { font-weight: 400; color: var(--color-text-secondary); font-size: 12px; }
@@ -789,6 +921,7 @@ button.ghost:hover:not(:disabled) {
 @media (max-width: 1000px) {
   .ask-body { grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr); gap: 24px; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); }
+  .compare-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 @media (max-width: 720px) {
@@ -835,6 +968,11 @@ button.ghost:hover:not(:disabled) {
   .modal { padding: 12px; }
   .modal-box { max-height: 90vh; }
   .modal-head, .modal-body { padding-inline: 14px; }
+  .read-bar, .read-body { padding-inline: 18px; }
+  .read-title { flex-basis: 100%; order: 3; }
+  .read-bar button { flex: 0 0 auto; }
+  .conv-chip { max-width: 150px; }
+  .compare-grid, .cmp-only { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 390px) {
@@ -845,6 +983,7 @@ button.ghost:hover:not(:disabled) {
   .tab { font-size: 11px; }
   .ask-top, .search-top { padding-inline: 14px; }
   .ask-body { padding-inline: 14px; }
+  .read-bar, .read-body { padding-inline: 14px; }
   .search-body, .facet-body { padding-inline: 14px; }
   .seg button { padding-inline: 8px; font-size: 11px; }
   .grid, .axis-card .grid { grid-template-columns: minmax(0, 1fr); }

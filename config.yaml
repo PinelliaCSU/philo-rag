@@ -158,6 +158,17 @@ gate:
                             # 按 bge-base-zh-v1.5 标定（相关 min≈0.55 / 垃圾 max≈0.44）；
                             # 换嵌入模型需重新标定；hashing 后端此闸门自动放行
 
+# ---------- 6d. 会话与追问 ----------
+# 同一 conversation_id 内，「继续 / 详细点 / 那X呢 / 和Y比呢」在**闸门之前**改写成
+# 可独立检索的问题（改写后的句子自带主题，于是 gate 的 fragment 自然不再命中）。
+# 会话只存进程内存：TTL 到点即丢，丢掉的代价只是追问降级为普通提问。
+conversation:
+  enabled: true
+  ttl_sec: 1800          # 30 分钟无活动即过期（过期后追问降级为普通提问，文案见 gate）
+  max_turns: 4           # 单会话保留轮次（改写只需最近 1–2 轮，其余留给后续显示）
+  digest_chars: 300      # 上一轮要点注入上限（范围查询改用结构化字段，不取正文）
+  max_conversations: 64  # 进程内会话数上限，超出按最久未用淘汰
+
 # ---------- 7. 结果输出 ----------
 output:
   format: md                # md | json | jsonl | csv | txt（CLI --format 可覆盖）

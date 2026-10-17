@@ -14,6 +14,7 @@
     GET  /api/units           体系目录（卷 → 单元）
     GET  /api/unit?code=      单元导览（单元元信息 + 该单元的块/术语/理论家）
     GET  /api/concepts        术语卡列表
+    GET  /api/compare?a=&b=   两个概念的对比（定义 / 共现差异 / 引文）
     POST /api/ask             溯源回答（body 可传 strategy：auto | point | theme）
     POST /api/ask_stream      溯源回答（SSE 流式：meta → delta… → done）
     GET  /api/term?term=      术语索引与语义检索
@@ -35,6 +36,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from . import conv
 from .answer import answer as answer_fn
 from .answer import answer_stream as answer_stream_fn
 from .index import Store
@@ -78,11 +80,15 @@ class AskRequest(BaseModel):
     需要按单元/理论家/概念浏览，请改用 /api/term 与分面接口。
 
     strategy：auto（默认，按问题自动判定）| point（强制点查询）| theme（强制范围查询）。
+
+    conversation_id：同一会话内「继续 / 详细点 / 那X呢」按上文改写成独立问题。
+    首次提问留空，响应会带回新 id；会话状态由 answer 层读写，本层只做转发。
     """
 
     question: str = Field(..., min_length=1)
     strategy: str = Field("auto", pattern="^(auto|point|theme)$")
     focus: str | None = None
+    conversation_id: str | None = Field(None, max_length=32, pattern=r"^[0-9a-zA-Z_-]*$")
 
 
 def _load(cfg: dict) -> Runtime:
@@ -125,7 +131,7 @@ def _load(cfg: dict) -> Runtime:
 
 def create_app(cfg: dict) -> FastAPI:
     rt = _load(cfg)
-    app = FastAPI(title="哲学大纲知识库", version="1.1.0")
+    app = FastAPI(title="哲学大纲知识库", version="1.2.0")
 
     # 生成层出错（缺 key、接口报错、网络不通…）时不要把 500 裸奔给前端，
     # 转成带可读 detail 的 JSON，界面直接显示原因而不是 "Internal Server Error"。
@@ -159,6 +165,7 @@ def create_app(cfg: dict) -> FastAPI:
     def stats() -> dict:
         store, lex, cfg = rt.store, rt.lex, rt.cfg
         a_cfg = cfg.get("answer", {}) or {}
+        conv_conf = conv.settings(cfg)
         return {
             "manifest": store.manifest,
             "volumes": lex.volumes,
@@ -166,6 +173,11 @@ def create_app(cfg: dict) -> FastAPI:
             "answer": {
                 "backend": a_cfg.get("backend", "template"),
                 "model": a_cfg.get("api_model") or a_cfg.get("model", ""),
+            },
+            # 会话能力开关：冒烟时据此确认追问改写是否真的生效
+            "conversation": {
+                "enabled": bool(conv_conf["enabled"]),
+                "ttl_sec": int(conv_conf["ttl_sec"]),
             },
             "counts": {
                 "philosophers": len(lex.philosophers),
@@ -256,10 +268,22 @@ def create_app(cfg: dict) -> FastAPI:
             for name, info in lex.concepts.items()
         ]
 
+    @app.get("/api/compare")
+    def compare(a: str = Query(..., min_length=1), b: str = Query(..., min_length=1)) -> dict:
+        """两个概念的对比：定义与归属 / 共现差异 / 引文。
+
+        延迟导入：对比能力由 retrieve 的 build_compare 提供（与本次改动并行落地），
+        放在模块顶部会让应用在它尚未存在时直接起不来。
+        """
+        from .retrieve import build_compare
+
+        return build_compare(rt.store, rt.lex, a, b)
+
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
         store, lex, cfg = rt.store, rt.lex, rt.cfg
-        return answer_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus)
+        return answer_fn(store, lex, req.question, cfg, strategy=req.strategy,
+                         focus=req.focus, conversation_id=req.conversation_id)
 
     @app.post("/api/ask_stream")
     async def ask_stream(req: AskRequest):
@@ -280,7 +304,9 @@ def create_app(cfg: dict) -> FastAPI:
         store, lex, cfg = rt.store, rt.lex, rt.cfg
 
         def event_gen():
-            for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy, focus=req.focus):
+            for event in answer_stream_fn(store, lex, req.question, cfg, strategy=req.strategy,
+                                         focus=req.focus,
+                                         conversation_id=req.conversation_id):
                 yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
 
         # no-cache / X-Accel-Buffering：避免浏览器与反向代理再次把 SSE 攒起来

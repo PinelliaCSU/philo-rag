@@ -73,6 +73,11 @@ models/
 !.vscode/tasks.json
 !.vscode/launch.json
 
+# 调试/子代理留下的临时目录（沙箱下可能删不掉，至少不入库）
+.basetemp-*/
+.tmp-*/
+.pt/
+
 # OS metadata
 .DS_Store
 Thumbs.db

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "philo-rag"
-version = "1.1.0"
+version = "1.2.0"
 description = "《哲学大纲》知识库：引用溯源问答、术语索引与语义检索、体系浏览"
 requires-python = ">=3.10"
 dependencies = [

@@ -17,6 +17,8 @@
   <button type="button" class="tab" data-p="search" aria-pressed="false">术语 / 引文检索</button>
   <button type="button" class="tab" data-p="map" aria-pressed="false">体系地图</button>
   <button type="button" class="tab" data-p="notes" aria-pressed="false">笔记</button>
+  <button type="button" class="tab" data-p="history" aria-pressed="false">历史</button>
+  <button type="button" class="tab" data-p="compare" aria-pressed="false">对比</button>
 </nav>
 
 <main>
@@ -37,20 +39,19 @@
       <div class="row ask-input-row">
         <input type="text" id="q" placeholder="输入问题或主题…">
         <button id="ask-btn">提问</button>
+        <button type="button" class="ghost" id="conv-new">新对话</button>
+      </div>
+      <div class="row conv-row">
+        <span class="label">最近提问</span>
+        <div class="conv-chips" id="conv-chips"></div>
       </div>
     </div>
 
     <div class="ask-body">
+      <!-- 初始提示卡由 app.js 的 ASK_INTRO_HTML 渲染：骨架渲染会覆盖本区域，
+           只有把它收进一个常量，点「新对话」才能复原出同一张卡 -->
       <div class="answer-pane" id="ask-out">
-        <div class="card">
-          <h3>怎么问？</h3>
-          <p class="muted intro-note">
-            上面「提问方式」可手动切换，也可以留在<b>自动判定</b>由系统按措辞决定。
-            切换后下方会给出该方式的适用范围与示例，点示例即可直接发问。
-            回答末尾的「术语注解」可点击，点击术语即打开<b>概念卡</b>；
-            <b>术语 / 引文检索</b>与<b>体系地图</b>从顶部按钮召唤。
-          </p>
-        </div>
+        <div class="muted">界面加载中…</div>
       </div>
 
       <div class="cite-pane">
@@ -63,6 +64,21 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- ============ 连续阅读：全宽视图（侧栏宽度不适合长文阅读） ============ -->
+  <section class="view" id="v-read">
+    <div class="read-bar">
+      <button type="button" class="ghost" id="read-prev" data-read-nav="">上一单元</button>
+      <div class="read-title" id="read-title"></div>
+      <button type="button" class="ghost" id="read-next" data-read-nav="">下一单元</button>
+      <div class="read-tools">
+        <button type="button" class="ghost" id="read-font-dec">字号-</button>
+        <button type="button" class="ghost" id="read-font-inc">字号+</button>
+        <button type="button" class="ghost" id="read-back">返回地图</button>
+      </div>
+    </div>
+    <div class="read-body" id="read-out"></div>
   </section>
 
   <!-- ============ 可召唤侧栏：概念卡 / 检索 / 体系地图 ============ -->
@@ -120,6 +136,36 @@
           </div>
         </div>
         <div id="notes-out"></div>
+      </section>
+
+      <!-- 面板五：问答历史（只存浏览器本地；引用正文按 chunk_id 回捞，不存本地） -->
+      <section class="panel-pane" id="pane-history">
+        <div class="notes-top">
+          <div class="muted">每次回答生成完自动记一条，保存在浏览器本地（与「笔记」分开存放）；
+            引用只存坐标不存正文，点引用卡的「展开全文」按需回捞。</div>
+          <div class="row">
+            <input type="text" id="hist-filter" placeholder="过滤：匹配问题或改写后的问题">
+          </div>
+          <div class="row">
+            <button id="hist-export-json" class="ghost">导出 JSON（备份）</button>
+            <button id="hist-export-md" class="ghost">导出 Markdown</button>
+          </div>
+        </div>
+        <div id="hist-out"></div>
+      </section>
+
+      <!-- 面板六：概念对比（概念 vs 概念；理论家对比本轮不做） -->
+      <section class="panel-pane" id="pane-compare">
+        <div class="row concept-form">
+          <input type="text" id="cmp-a" placeholder="概念 A，如：大他者">
+          <input type="text" id="cmp-b" placeholder="概念 B，如：客体小a">
+        </div>
+        <div class="row cmp-go-row">
+          <button id="cmp-go">对比</button>
+        </div>
+        <div id="cmp-out">
+          <div class="card muted">输入两个概念，比较它们的定义、归属、共现概念与引文差异。</div>
+        </div>
       </section>
 
     </div>

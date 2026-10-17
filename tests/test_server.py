@@ -123,7 +123,72 @@ def test_context_returns_neighbour_chunks_and_404(client):
     assert client.get("/api/context", params={"chunk_id": "不存在"}).status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# 对比模式（T4）：数据层在 retrieve.build_compare、路由在 server，两处分别改动最易错位，
+# 这里从 HTTP 入口把契约锁一次（字段名、units 的 hits 口径、单侧缺失降级）。
+# --------------------------------------------------------------------------- #
+def test_compare_endpoint_returns_two_sides(client):
+    resp = client.get("/api/compare", params={"a": "大他者", "b": "象征界"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"terms", "shared_related", "shared_units",
+                         "a_only_related", "b_only_related"}
+    left, right = body["terms"]
+    assert left["found"] and right["found"]
+    assert isinstance(left["definition"], str) and left["definition"]
+    assert {"code", "title", "hits"} <= set(left["units"][0])
+    assert body["shared_related"] and {"name", "a", "b", "sum"} <= set(body["shared_related"][0])
+    assert len(left["quotes"]) <= 3
+
+    missing = client.get("/api/compare", params={"a": "不存在的东西", "b": "象征界"}).json()
+    assert missing["terms"][0]["found"] is False and missing["terms"][1]["found"] is True
+
+
 def test_static_assets_are_served(client):
     assert client.get("/").status_code == 200
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/styles.css").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# 会话与追问（T1）：带同一 conversation_id 的第二次提问必须被改写成独立问题
+# --------------------------------------------------------------------------- #
+def test_stats_reports_conversation_switch(client):
+    """/api/stats 要能看到会话开关与 TTL，冒烟时据此确认改写是否真的生效。"""
+    body = client.get("/api/stats").json()
+    assert body["conversation"] == {"enabled": True, "ttl_sec": 1800}
+
+
+def test_ask_rewrites_followup_inside_same_conversation(client):
+    first = client.post(
+        "/api/ask", json={"question": "什么是字头？【conv-followup】"}
+    ).json()
+    cid = first["conversation_id"]
+    assert cid, "首次提问必须带回新会话 id"
+    assert first["is_followup"] is False
+    assert first["standalone"] == "什么是字头？【conv-followup】"
+
+    second = client.post("/api/ask", json={"question": "继续", "conversation_id": cid}).json()
+    # 「继续」在闸门之前被改写成上一轮的独立问题，因此不再落到 gate
+    assert second["conversation_id"] == cid
+    assert second["skipped"] is False
+    assert second["strategy"] != "gate"
+    assert second["is_followup"] is True
+    assert second["standalone"] == first["standalone"]
+
+
+def test_ask_stream_meta_carries_conversation(client):
+    cid = "stream-conv-1"
+    with client.stream(
+        "POST",
+        "/api/ask_stream",
+        json={"question": "什么是字头？【conv-stream-meta】", "conversation_id": cid},
+    ) as resp:
+        assert resp.status_code == 200
+        raw = "".join(resp.iter_text())
+    events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: ")]
+    assert [e["type"] for e in events] == ["meta", "delta", "done"]
+    meta = events[0]
+    assert meta["conversation_id"] == cid
+    assert meta["standalone"] == "什么是字头？【conv-stream-meta】"
+    assert meta["is_followup"] is False

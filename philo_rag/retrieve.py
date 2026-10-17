@@ -571,6 +571,144 @@ def glossary_payload(store: Store, lex: Lexicon) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# 概念卡与概念对比共用：命中块、共现计数、定义句、单元分布、引文
+# --------------------------------------------------------------------------- #
+def _cite_text(doc_title: str, code: str, title: str, page: int) -> str:
+    """引注：《文档》· 单元 标题 · 第 N 页（缺项自动省略）。"""
+    parts: list[str] = []
+    if doc_title:
+        parts.append(f"《{doc_title}》")
+    if code:
+        parts.append(f"{code} {title}".strip() if title else code)
+    if page:
+        parts.append(f"第 {page} 页")
+    return " · ".join(parts)
+
+
+def _concept_hit_stats(
+    store: Store, lex: Lexicon, std: str, names: list[str]
+) -> tuple[list[Chunk], dict[str, int]]:
+    """术语的命中块与共现概念计数（概念卡与概念对比共用，口径只维护这一处）。
+
+    候选块＝注解倒排命中 ∪ 字面倒排候选（超集，再逐块复核），因此不对全库逐块
+    做正则；_candidate_indices 对含 ASCII 字母的词面返回 None，此时才退回全库
+    遍历，与原实现一致。共现概念只统计块级 concepts（精确注解，不含自身与别名），
+    不用 section_concepts（推断注解），避免把「同一节顺带提到」当成概念关联。
+    lex 仅为与 build_concept_card 保持同形调用，命中判定只依赖 store。
+    """
+    ids = _tagged_ids(store, names)
+    candidate_idx = _candidate_indices(store, ids, names)
+
+    def chunk_hits(c: Chunk) -> bool:
+        return std in c.concepts or any(_text_has(c.text, n) for n in names)
+
+    if candidate_idx is None:
+        hits = [c for c in store.chunks if chunk_hits(c)]
+    else:
+        hits = [store.chunks[i] for i in candidate_idx if chunk_hits(store.chunks[i])]
+
+    skip = set(names) | {std}
+    related_counts: dict[str, int] = {}
+    for c in hits:
+        for other in c.concepts:
+            if other not in skip:
+                related_counts[other] = related_counts.get(other, 0) + 1
+    return hits, related_counts
+
+
+def _definition_chunk(card: dict[str, Any], names: list[str], hits: list[Chunk]) -> Chunk | None:
+    """定义句块：正文中「X 是/即/意味着」的定义句式块。
+
+    排序键依次为：正文块优先、标准名句式优先、与词典定义重合度高优先、术语密度高
+    优先，末位键是 seq，因此同一语料上的选择结果稳定。
+    """
+    std = str(card["name"])
+    defn_pat_std = re.compile(rf"{re.escape(std)}\s*(?:是|即|意味着)")
+    defn_pats = [defn_pat_std] + [
+        re.compile(rf"{re.escape(n)}\s*(?:是|即|意味着)") for n in names if n != std
+    ]
+    lex_tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", card.get("definition") or "")
+    type_rank = {"body": 0, "footnote": 1, "quote": 2}
+    defn: Chunk | None = None
+    defn_key: tuple | None = None
+    for c in hits:
+        if not any(p.search(c.text) for p in defn_pats):
+            continue
+        canon = 1 if defn_pat_std.search(c.text) else 0
+        density = sum(c.text.count(n) for n in names) / max(len(c.text), 1)
+        overlap = sum(1 for tok in lex_tokens if tok in c.text)
+        key = (type_rank.get(c.chunk_type, 3), -canon, -overlap, -density, c.seq)
+        if defn_key is None or key < defn_key:
+            defn_key = key
+            defn = c
+    return defn
+
+
+def _unit_phil_stats(
+    hits: list[Chunk],
+) -> tuple[dict[str, int], dict[str, list[str]], dict[str, int]]:
+    """命中块的单元计数（附章节路径，供取单元标题）与理论家计数。"""
+    unit_hits: dict[str, int] = {}
+    unit_paths: dict[str, list[str]] = {}
+    phil_hits: dict[str, int] = {}
+    for c in hits:
+        code = c.unit_code()
+        if code:
+            unit_hits[code] = unit_hits.get(code, 0) + 1
+            unit_paths.setdefault(code, list(c.chapter_path))
+        for p in c.philosophers:
+            phil_hits[p] = phil_hits.get(p, 0) + 1
+    return unit_hits, unit_paths, phil_hits
+
+
+def _unit_list(
+    lex: Lexicon, unit_hits: dict[str, int], unit_paths: dict[str, list[str]], limit: int
+) -> list[dict[str, Any]]:
+    """单元分布 → [{code, title, hits}]，按命中数降序、同分按单元号升序（顺序稳定）。"""
+    return [
+        {"code": code, "title": lex.unit_title(code, unit_paths.get(code)), "hits": int(count)}
+        for code, count in sorted(unit_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    ]
+
+
+def _top_counts(counts: dict[str, int], limit: int) -> list[dict[str, Any]]:
+    """计数表 → [{name, count}]，按次数降序、同分按名称升序（顺序稳定可复现）。"""
+    return [
+        {"name": name, "count": int(count)}
+        for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    ]
+
+
+def _theme_names(lex: Lexicon, std: str) -> list[str]:
+    """词典里把该概念列为主题成员的主题名（顺序即 themes.yaml 顺序）。"""
+    return [str(t.get("name", "")) for t in lex.themes if std in (t.get("concepts") or [])]
+
+
+def _concept_quotes(
+    store: Store, lex: Lexicon, names: list[str], limit: int
+) -> list[dict[str, Any]]:
+    """含术语词面的引文块（按全书顺序取前 limit 条）。
+
+    只遍历引文块（store.quotes()），不扫描全库正文。
+    """
+    doc_title = store.manifest.get("doc_title", "")
+    quote_chunks = [c for c in store.quotes() if any(_text_has(c.text, n) for n in names)]
+    quote_chunks.sort(key=lambda c: c.seq)
+    quotes: list[dict[str, Any]] = []
+    for c in quote_chunks[:limit]:
+        code = c.unit_code()
+        title = lex.unit_title(code, c.chapter_path)
+        quotes.append({
+            "chunk_id": c.chunk_id,
+            "text": c.text,
+            "speaker": c.speaker or "未署名",
+            "unit": code,
+            "citation": _cite_text(doc_title, code, title, int(c.page or 0)),
+        })
+    return quotes
+
+
+# --------------------------------------------------------------------------- #
 # 概念卡构建：/api/concept 数据源
 # --------------------------------------------------------------------------- #
 def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) -> dict[str, Any]:
@@ -600,51 +738,9 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
     aliases = list(card.get("aliases") or [])
     names = list(dict.fromkeys([std, *aliases]))
 
-    # 候选块：注解倒排命中 ∪ 字面命中候选（超集，逐块复核）；ASCII 词面退回全库扫描
-    ids = _tagged_ids(store, names)
-    candidate_idx = _candidate_indices(store, ids, names)
-
-    def chunk_hits(c: Chunk) -> bool:
-        return std in c.concepts or any(_text_has(c.text, n) for n in names)
-
-    def hit_chunks() -> list[Chunk]:
-        if candidate_idx is None:
-            return [c for c in store.chunks if chunk_hits(c)]
-        return [store.chunks[i] for i in candidate_idx if chunk_hits(store.chunks[i])]
-
-    # definition：正文中「X 是/即/意味着」的定义句式块。排序键优先正文块、
-    # 优先标准名句式、优先与词典定义重合度高的块、优先术语密度高的块。
-    defn_pat_std = re.compile(rf"{re.escape(std)}\s*(?:是|即|意味着)")
-    defn_pats = [defn_pat_std] + [
-        re.compile(rf"{re.escape(n)}\s*(?:是|即|意味着)") for n in aliases
-    ]
-    lex_tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", card.get("definition") or "")
-    type_rank = {"body": 0, "footnote": 1, "quote": 2}
-    hits = hit_chunks()
-    defn: Chunk | None = None
-    defn_key: tuple | None = None
-    for c in hits:
-        if not any(p.search(c.text) for p in defn_pats):
-            continue
-        canon = 1 if defn_pat_std.search(c.text) else 0
-        density = sum(c.text.count(n) for n in names) / max(len(c.text), 1)
-        overlap = sum(1 for tok in lex_tokens if tok in c.text)
-        key = (type_rank.get(c.chunk_type, 3), -canon, -overlap, -density, c.seq)
-        if defn_key is None or key < defn_key:
-            defn_key = key
-            defn = c
-
-    doc_title = store.manifest.get("doc_title", "")
-
-    def cite(code: str, title: str, page: int) -> str:
-        parts: list[str] = []
-        if doc_title:
-            parts.append(f"《{doc_title}》")
-        if code:
-            parts.append(f"{code} {title}".strip() if title else code)
-        if page:
-            parts.append(f"第 {page} 页")
-        return " · ".join(parts)
+    # 命中块与共现计数走共用助手（与 build_compare 同一口径）
+    hits, related_counts = _concept_hit_stats(store, lex, std, names)
+    defn = _definition_chunk(card, names, hits)
 
     definition = None
     if defn is not None:
@@ -657,57 +753,19 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
             "unit_title": title,
             "page": int(defn.page or 0),
             "char_span": f"{defn.start}-{defn.end}",
-            "citation": cite(code, title, int(defn.page or 0)),
+            "citation": _cite_text(
+                store.manifest.get("doc_title", ""), code, title, int(defn.page or 0)
+            ),
         }
 
-    unit_hits: dict[str, int] = {}
-    unit_paths: dict[str, list[str]] = {}
-    phil_hits: dict[str, int] = {}
-    for c in hits:
-        code = c.unit_code()
-        if code:
-            unit_hits[code] = unit_hits.get(code, 0) + 1
-            unit_paths.setdefault(code, list(c.chapter_path))
-        for p in c.philosophers:
-            phil_hits[p] = phil_hits.get(p, 0) + 1
+    unit_hits, unit_paths, phil_hits = _unit_phil_stats(hits)
+    units = _unit_list(lex, unit_hits, unit_paths, 10)
+    philosophers = _top_counts(phil_hits, 10)
 
-    units = [
-        {"code": code, "title": lex.unit_title(code, unit_paths.get(code)), "hits": int(hits)}
-        for code, hits in sorted(unit_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
-    ]
-    philosophers = [
-        {"name": name, "count": int(count)}
-        for name, count in sorted(phil_hits.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
-    ]
-
-    quote_chunks = [
-        c for c in store.quotes() if any(_text_has(c.text, n) for n in names)
-    ]
-    quote_chunks.sort(key=lambda c: c.seq)
-    quotes = [
-        {
-            "chunk_id": c.chunk_id,
-            "text": c.text,
-            "speaker": c.speaker or "未署名",
-            "unit": c.unit_code(),
-            "citation": cite(c.unit_code(), lex.unit_title(c.unit_code(), c.chapter_path), int(c.page or 0)),
-        }
-        for c in quote_chunks[:limit]
-    ]
+    quotes = _concept_quotes(store, lex, names, limit)
 
     # 相关概念：与术语在同一块内共现的**精确注解**（不含别名与自身），按共现次数排序。
-    # 只统计块级 concepts（精确命中），不用 section_concepts（推断注解），
-    # 避免把「同一节顺带提到」当成概念关联。
-    related_counts: dict[str, int] = {}
-    skip = set(names) | {std}
-    for c in hits:
-        for other in c.concepts:
-            if other not in skip:
-                related_counts[other] = related_counts.get(other, 0) + 1
-    related = [
-        {"name": name, "count": int(count)}
-        for name, count in sorted(related_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
-    ]
+    related = _top_counts(related_counts, 12)
 
     return {
         "term": term,
@@ -717,7 +775,98 @@ def build_concept_card(store: Store, lex: Lexicon, term: str, limit: int = 8) ->
         "units": units,
         "philosophers": philosophers,
         "related": related,
-        "themes": [str(t.get("name", "")) for t in lex.themes
-                   if std in (t.get("concepts") or [])],
+        "themes": _theme_names(lex, std),
         "quotes": quotes,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 概念对比：/api/compare 数据源（两个概念的共现交集与差异）
+# --------------------------------------------------------------------------- #
+_COMPARE_QUOTES = 3    # 对比面板每侧引文条数上限
+_COMPARE_SHARED = 12   # 共现交集 / 各自独有的展示条数上限
+
+
+def _compare_side(store: Store, lex: Lexicon, term: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """术语对比的单侧摘要，外加全量统计（共现概念、单元计数）供交集与差集计算。
+
+    词典未收录时返回 found=False 的空摘要与空统计，调用方仍照常产出另一侧。
+    """
+    card = lex.concept_card(term)
+    if card is None:
+        side = {
+            "term": term,
+            "found": False,
+            "definition": None,
+            "units": [],
+            "philosophers": [],
+            "themes": [],
+            "related": [],
+            "quotes": [],
+        }
+        return side, {"related": {}, "units": {}, "unit_paths": {}}
+
+    std = str(card["name"])
+    names = list(dict.fromkeys([std, *(card.get("aliases") or [])]))
+    hits, related_counts = _concept_hit_stats(store, lex, std, names)
+    defn = _definition_chunk(card, names, hits)
+    unit_hits, unit_paths, phil_hits = _unit_phil_stats(hits)
+    side = {
+        "term": term,
+        "found": True,
+        # 对比面板每侧只有一栏文字位，直接给定义句正文（概念卡仍返回结构化 definition）
+        "definition": defn.text if defn is not None else None,
+        "units": _unit_list(lex, unit_hits, unit_paths, 10),
+        "philosophers": _top_counts(phil_hits, 10),
+        "themes": _theme_names(lex, std),
+        "related": _top_counts(related_counts, _COMPARE_SHARED),
+        "quotes": _concept_quotes(store, lex, names, _COMPARE_QUOTES),
+    }
+    stats = {"related": related_counts, "units": unit_hits, "unit_paths": unit_paths}
+    return side, stats
+
+
+def build_compare(store: Store, lex: Lexicon, a: str, b: str) -> dict[str, Any]:
+    """概念对比：两侧摘要 + 共现交集/差集 + 共有单元（/api/compare 的数据层）。
+
+    terms 恒为两项（a 在前、b 在后）；任一侧词典未收录时该侧 found=False，另一侧
+    照常返回（前端显示「词典未收录」，不整页失败）；a 与 b 是同一概念时两侧计数
+    相同、独有清单为空。所有列表都带确定的次级排序键，连续调用结果逐字段相同。
+    """
+    a_side, a_stats = _compare_side(store, lex, a)
+    b_side, b_stats = _compare_side(store, lex, b)
+    a_rel: dict[str, int] = a_stats["related"]
+    b_rel: dict[str, int] = b_stats["related"]
+
+    # 共现交集：两侧都出现的概念，sum 为两侧次数之和；同分按名称升序
+    shared_related = [
+        {"name": name, "a": a_rel[name], "b": b_rel[name], "sum": a_rel[name] + b_rel[name]}
+        for name in a_rel.keys() & b_rel.keys()
+    ]
+    shared_related.sort(key=lambda r: (-r["sum"], r["name"]))
+
+    # 共有单元：两侧都命中的单元，按两侧命中数之和降序；同分按单元号升序
+    a_units: dict[str, int] = a_stats["units"]
+    b_units: dict[str, int] = b_stats["units"]
+    shared_units = [
+        {
+            "code": code,
+            "title": lex.unit_title(code, a_stats["unit_paths"].get(code)),
+            "a": a_units[code],
+            "b": b_units[code],
+        }
+        for code in a_units.keys() & b_units.keys()
+    ]
+    shared_units.sort(key=lambda r: (-(r["a"] + r["b"]), r["code"]))
+
+    return {
+        "terms": [a_side, b_side],
+        "shared_related": shared_related[:_COMPARE_SHARED],
+        "shared_units": shared_units,
+        "a_only_related": _top_counts(
+            {n: c for n, c in a_rel.items() if n not in b_rel}, _COMPARE_SHARED
+        ),
+        "b_only_related": _top_counts(
+            {n: c for n, c in b_rel.items() if n not in a_rel}, _COMPARE_SHARED
+        ),
     }

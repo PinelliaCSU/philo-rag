@@ -25,6 +25,7 @@ from .answer_prompt import (
     prompt_style,
 )
 from .citations import citations_from_theme, group_citation
+from .conv import with_prior
 from .index import Store
 from .lexicon import Lexicon
 from .llm import api_answer, api_answer_stream, ollama_answer
@@ -205,8 +206,12 @@ def _theme_generate(
     cfg: dict[str, Any],
     backend: str,
     focus: str | None = None,
+    prior: str = "",
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    """范围查询的 LLM 生成：quote_first 走结构化 JSON，legacy 走自由文本。"""
+    """范围查询的 LLM 生成：quote_first 走结构化 JSON，legacy 走自由文本。
+
+    `prior` 是上一轮要点 + 本轮侧重（追问时非空），前置到 context 而不新增模板占位符。
+    """
     style = prompt_style(cfg)
     a_cfg = (cfg or {}).get("answer", {}) or {}
     glossary = build_glossary(topic, [res["context"]], lex)
@@ -215,7 +220,7 @@ def _theme_generate(
             doc_title=doc_title,
             topic=topic,
             glossary=glossary,
-            context=res["context"],
+            context=with_prior(prior, res["context"]),
             bridge_max_chars=bridge_max(cfg),
             focus_guide=focus_guide(focus),
         )
@@ -224,7 +229,7 @@ def _theme_generate(
             doc_title=doc_title,
             topic=topic,
             glossary=glossary,
-            context=res["context"],
+            context=with_prior(prior, res["context"]),
             min_chars=int(a_cfg.get("theme_min_chars", 1500)),
             max_chars=int(a_cfg.get("theme_max_chars", 4000)),
         )
@@ -241,6 +246,7 @@ def _theme_generate(
 def theme_answer(
     store: Store, lex: Lexicon, topic: str, cfg: dict[str, Any],
     focus: str | None = None,
+    prior: str = "",
 ) -> dict[str, Any]:
     """范围查询策略：主题聚合检索 → 结构化上下文 → 生成 → 附引用。
 
@@ -281,7 +287,9 @@ def theme_answer(
     if backend == "template":
         text, citations, sections, annotations = render_theme(res, lex, cfg)
     else:
-        text, sections, annotations = _theme_generate(topic, res, doc_title, lex, cfg, backend, focus=focus)
+        text, sections, annotations = _theme_generate(
+            topic, res, doc_title, lex, cfg, backend, focus=focus, prior=prior
+        )
         citations = citations_from_theme(res, doc_title)
 
     return {
@@ -322,6 +330,7 @@ def _theme_answer_stream(
     question: str, gate: dict[str, Any],
     focus: str | None = None,
     route_reason: str = "",
+    prior: str = "",
 ):
     """范围查询的流式生成，被 answer_stream 调用。"""
     from .theme import theme_search
@@ -389,7 +398,7 @@ def _theme_answer_stream(
             doc_title=doc_title,
             topic=topic,
             glossary=build_glossary(topic, [res["context"]], lex),
-            context=res["context"],
+            context=with_prior(prior, res["context"]),
             bridge_max_chars=bridge_max(cfg),
             focus_guide=focus_guide(focus),
         )
@@ -434,7 +443,7 @@ def _theme_answer_stream(
         doc_title=doc_title,
         topic=topic,
         glossary=build_glossary(topic, [res["context"]], lex),
-        context=res["context"],
+        context=with_prior(prior, res["context"]),
         min_chars=int(a_cfg.get("theme_min_chars", 1500)),
         max_chars=int(a_cfg.get("theme_max_chars", 4000)),
     )
