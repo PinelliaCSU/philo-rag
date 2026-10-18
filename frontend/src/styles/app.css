@@ -101,12 +101,30 @@ button, input, textarea {
   width: 24px;
   height: 24px;
   margin: -12px 0 0 -12px;
-  border-radius: 50%;
   background: transparent;
   pointer-events: auto;
   cursor: pointer;
 }
-.star-hotspot:hover { background: radial-gradient(circle, rgba(233,229,219,0.06), transparent 70%); }
+/* 命中区提示改成四角括线（方形标注），不再用径向渐变的光斑 */
+.star-hotspot::before,
+.star-hotspot::after {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border: 1px solid transparent;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.star-hotspot::before { left: 1px; top: 1px; border-right: 0; border-bottom: 0; }
+.star-hotspot::after { right: 1px; bottom: 1px; border-left: 0; border-top: 0; }
+.star-hotspot:hover::before,
+.star-hotspot:hover::after,
+.star-hotspot:focus-visible::before,
+.star-hotspot:focus-visible::after {
+  opacity: 1;
+  border-color: rgba(233, 239, 250, 0.5);
+}
 
 /* 观测提示：一条极淡说明 + 当前缩放比例，不拦截事件 */
 .sky-hint {

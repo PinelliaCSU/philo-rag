@@ -22,37 +22,32 @@ test('首屏只有星图、光标与示例纸片', async ({ page }) => {
   await expect(page.locator('input[type=text], input[type=search]:not(.starbox-search)')).toHaveCount(0);
 });
 
-test('P1/P5 背景是可辨识的恒星图，不是一片黑', async ({ page }) => {
+test('P1 星图只显示可查询的概念节点：未命中时一个点都没有', async ({ page }) => {
   await page.goto('/');
-  // 采样背景层像素：非负亮度像素占比应远超「几乎全黑」
+  // 未命中：没有任何可点击节点热区，已点亮列表为空
+  await expect(page.locator('.star-hotspot')).toHaveCount(0);
+  await expect(page.locator('.lit-list li')).toHaveCount(0);
+
+  // 背景层只有图版家具（框线/网格/刻度），没有装饰星点：
+  // 采样最亮像素的连通块尺寸——星点会是孤立的小块，网格是长直线。
   const stats = await page.evaluate(() => {
     const c = document.querySelector('.starfield canvas');
     const ctx = c.getContext('2d');
     const { data } = ctx.getImageData(0, 0, c.width, c.height);
     let lit = 0;
-    let sum = 0;
     for (let i = 0; i < data.length; i += 4) {
-      const v = data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722;
-      if (v > 12) lit += 1;
-      sum += v;
+      if (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722 > 40) lit += 1;
     }
-    return { pixels: data.length / 4, litRatio: lit / (data.length / 4), mean: sum / (data.length / 4) };
+    return { ratio: lit / (data.length / 4) };
   });
-  expect(stats.litRatio).toBeGreaterThan(0.002);   // 至少有可见星点
-  expect(stats.mean).toBeGreaterThan(0.05);
+  expect(stats.ratio).toBeLessThan(0.02);   // 只有细线，不该有大片亮点
 
-  // 正文对比度：正文色与背景的相对亮度比 ≥ 4.5:1
-  const ratio = await page.evaluate(() => {
-    const lin = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
-    const L = (rgb) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
-    const parse = (s) => (s.match(/[\d.]+/g) || []).map(Number);
-    const body = parse(getComputedStyle(document.body).backgroundColor);
-    const ink = parse(getComputedStyle(document.documentElement).getPropertyValue('--ink').trim().length > 0
-      ? 'rgb(244, 240, 231)' : 'rgb(244, 240, 231)');
-    const [a, b] = [L(ink), L(body.length >= 3 ? body : [18, 17, 16])].sort((x, y) => y - x);
-    return (a + 0.05) / (b + 0.05);
-  });
-  expect(ratio).toBeGreaterThan(4.5);
+  // 提问后：热区出现，且每个热区标签都能在词典里查到
+  await ask(page, '什么是大他者？');
+  const labels = await page.locator('.star-hotspot').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+  expect(labels.length).toBeGreaterThan(0);
+  const concepts = await page.evaluate(async () => (await (await fetch('/api/concepts')).json()).map((c) => c.name));
+  for (const label of labels) expect(concepts).toContain(label);
 });
 
 test('P2 星图可缩放、可旋转', async ({ page }) => {

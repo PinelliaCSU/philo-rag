@@ -185,6 +185,7 @@ function pump() {
     app.tail += chunk;
     // 每个提交批次给背景一次脉冲：星图的闪烁因此与输出节奏同频
     if (starBridge.flash) starBridge.flash(chunk.length);
+    noteStreamTerms(chunk.length);
     // 块边界：把已完成的块提交为 html，只留最后一块继续长
     // （用 /\n[ \t]*\n/ 而不是 '\n\n'：空行里可能带缩进）
     if (BLANK_LINE.test(app.tail)) {
@@ -204,6 +205,21 @@ function longestText(...candidates) {
   let best = '';
   for (const c of candidates) if (typeof c === 'string' && c.length > best.length) best = c;
   return best;
+}
+
+// 流式期滚动扫描：术语一出现就算命中（受 ≤8 上限约束），
+// 这样术语注解与星图点亮都能在定型之前就跟着文字出现，而不是等 1.2s 后的全量重渲染。
+let scanBudget = 0;
+function noteStreamTerms(taken) {
+  scanBudget += taken;
+  if (scanBudget < 8 || !app.lexicon.index.length || app.lit.length >= LIT_LIMIT) return;
+  scanBudget = 0;
+  const found = topTerms(findTerms(app.tail, app.lexicon.index), LIT_LIMIT);
+  for (const name of found) {
+    if (app.lit.length >= LIT_LIMIT) break;
+    if (app.lit.includes(name)) continue;
+    enqueueLit([name]);
+  }
 }
 
 function finishAuthoritative() {
@@ -417,9 +433,13 @@ async function fallbackToPoint(question) {
 
 /** 定型后按权威文本重新算一遍术语命中：正文 + done.annotations。 */
 function commitTermHits(annotations) {
-  const names = [];
+  // 流式期已经命中的词排在前面（它们的注解已经显示在正文里），再补权威文本里的新词
+  const names = app.lit.slice(0, LIT_LIMIT);
   const hits = findTerms(app.answerRaw || '', app.lexicon.index);
-  for (const name of topTerms(hits, LIT_LIMIT)) names.push(name);
+  for (const name of topTerms(hits, LIT_LIMIT)) {
+    if (names.length >= LIT_LIMIT) break;
+    if (!names.includes(name)) names.push(name);
+  }
 
   for (const ann of annotations || []) {
     for (const name of ann.concepts || []) {
@@ -427,6 +447,7 @@ function commitTermHits(annotations) {
       if (!names.includes(name)) names.push(name);
     }
   }
+  void 0;
   if (app.strategy === 'point' && app.question) {
     const asked = findTerms(app.question, app.lexicon.index);
     for (const name of topTerms(asked, 1)) {

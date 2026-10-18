@@ -23,6 +23,20 @@ def test_node_count_matches_lexicon_concepts(payload, lex):
     assert len(payload["nodes"]) == len(lex.concepts), "星图节点必须覆盖全部词典概念"
 
 
+def test_every_node_is_a_queryable_concept(payload, lex):
+    """星图上不允许出现不可查询的装饰节点。
+
+    前端只画 nodes，所以「节点 = 词典概念」这条在数据层钉死：
+    每个 id 都必须能在词典里查到（/api/concept?term= 也就能查到）。
+    """
+    unknown = [n["id"] for n in payload["nodes"] if n["id"] not in lex.concepts]
+    assert not unknown, f"星图里出现了不可查询的节点：{unknown[:5]}"
+    for node in payload["nodes"]:
+        card = lex.concept_card(node["id"])
+        assert card is not None, node["id"]
+        assert card["name"] == node["id"]
+
+
 def test_coordinates_are_normalized(payload):
     for node in payload["nodes"]:
         assert -1.0 <= node["x"] <= 1.0, node

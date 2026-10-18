@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { annotateCitations, replaceCitationTokens, shortSource } from '../../lib/citations.js';
   import { renderBlock, renderInline } from '../../lib/markdown.js';
-  import { markTermHits } from '../../lib/terms.js';
+  import { annotateTerms, replaceTermTokens } from '../../lib/terms.js';
   import { isLowPowerDevice, prefersReducedMotion, subscribe } from '../../lib/motion.js';
   import { LS, readFlag, setFlag } from '../../lib/db.js';
   import {
@@ -15,14 +15,34 @@
   let showHint = $state(false);
   let constellationOpen = $state(false);
 
-  // 已完成块只渲染一次：同一段原文永远产出同一段 html
+  // 正文的**唯一**渲染管线。术语注解与引用点都在这里产出，因此它们的生命周期
+  // 由 Svelte 的 {@html} 负责：块重新渲染时注解会重新生成，而不会像 DOM 副作用那样被抹掉。
+  function renderBody(raw, { finishedOnly = false } = {}) {
+    const { text: cited } = annotateCitations(raw, { finishedOnly });
+    const termed = annotateTerms(cited, app.lit, app.lexicon.index);
+    const html = finishedOnly ? renderInline(termed) : renderBlock(termed);
+    return replaceTermTokens(replaceCitationTokens(html, app.citations));
+  }
+
+  // memo 的 key 必须包含「点亮集合 + 引用集合」：两者都会改变输出（注解与句末圆点）。
+  // 只按原文缓存会让新的引用/注解永远不出现（旧实现的另一处隐患）。
   const memo = new Map();
+  let memoKey = '';
+  function currentKey() {
+    return app.answerId + '|' + app.lit.join(',') + '|'
+      + app.citations.map((c) => c.n + ':' + (c.chunk_id || '')).join(',');
+  }
+
   function blocksHtml() {
+    const key = currentKey();
+    if (key !== memoKey) {
+      memo.clear();
+      memoKey = key;
+    }
     return app.blocks.map((raw) => {
       const cached = memo.get(raw);
       if (cached) return cached;
-      const { text } = annotateCitations(raw);
-      const html = replaceCitationTokens(renderBlock(text), app.citations);
+      const html = renderBody(raw);
       memo.set(raw, html);
       return html;
     });
@@ -31,14 +51,8 @@
   const tailParts = $derived.by(() => {
     const tail = app.tail;
     const cut = Math.max(0, tail.length - (app.runLen || 0));
-    const before = tail.slice(0, cut);
-    const run = tail.slice(cut);
-    const render = (chunk) => {
-      if (!chunk) return '';
-      const { text } = annotateCitations(chunk, { finishedOnly: true });
-      return replaceCitationTokens(renderInline(text), app.citations);
-    };
-    return { before: render(before), run: render(run) };
+    const render = (chunk) => (chunk ? renderBody(chunk, { finishedOnly: true }) : '');
+    return { before: render(tail.slice(0, cut)), run: render(tail.slice(cut)) };
   });
 
   // 引用提示一次性淡入（3 秒），状态存 localStorage
@@ -104,12 +118,10 @@
     sampleRun();
   });
 
-  // 定型之后在 DOM 上标出术语命中，再把星点连到那个词（约 600ms 后淡出）
+  // 定型后把星点连到正文里的那个词（约 600ms 后淡出）。
+  // 这里只读 DOM 做几何测量，不再往 DOM 里插节点——注解已经由 renderBody 产出。
   $effect(() => {
     if (!app.done || !app.lit.length || !body) return;
-    if (!body.querySelector('.term-hit')) {
-      markTermHits(body, app.lit, app.lexicon.index);
-    }
     connectTerms(app.lit);
   });
 

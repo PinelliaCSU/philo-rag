@@ -1,14 +1,18 @@
-// 星图：自绘 Canvas 2D，三层画布（背景恒星 / 星座线 / 节点与脉冲）。
+// 星图：自绘 Canvas 2D，三层画布（图版 / 星座线 / 节点与流式反馈）。
 //
-// 概念节点仍旧遵守设计文档 §11 的硬规则：节点初始亮度 0，只有被回答命中的概念才亮；
-// 未点亮节点不显示标签、不响应点击；直接命中持久、一阶邻域临时；空闲时停止 rAF。
+// 节点策略（本轮重做）：
+//   · 星图上**只有概念节点**——每一个点都能用 /api/concept 查到；上一版的装饰星表已删除；
+//   · 全量概念图一装载就存在（183 个节点），但未命中的节点**一个像素都不画**，
+//     不用"暗淡显示"代替"不可见"；
+//   · 只有被回答命中（direct）或作为一阶邻域（halo）时才可见，直接命中持久、邻域 20s 衰减。
 //
-// 与设计文档的差异（P1 要求）：背景不再只有 520 个不可见的灰点，而是一张**可辨识的恒星图**——
-// 按幂律分布星等的程序化星表 + 银河带 + 亮星的四芒星芒。这些是装饰星，不参与点亮、
-// 不可点击、不写库；「点亮只由回答命中决定」这条契约没有被改动。
+// 视觉语言（对齐真实天文图）：星等由命中块数决定 → 点半径、四芒/八芒刻度长度与线宽；
+// 星座连线只在已点亮节点之间画；图版家具（外框、角标、经纬网格、边缘刻度尺）提供星图的版式。
+// **全图禁止**圆形发光 / 径向光晕 / 圆形辉光块：亮与暗只用「点的大小 + 刻度长短 + 线宽」表达，
+// 流式反馈也改成线性提亮 + 扫描线 + 底边量程刻度，代码里没有任何 createRadialGradient。
 //
-// 相机（P2）：scale（滚轮缩放）/ rotation（拖拽旋转）/ 平移（Shift+拖拽），
-// 概念节点与背景星共用同一个相机，所以缩放旋转时它们一起动。
+// 相机：scale（滚轮缩放）/ rotation（拖拽旋转）/ 平移（Shift+拖拽），
+// 概念节点与图版共用同一个相机，所以缩放旋转时它们一起动。
 import { prefersReducedMotion, subscribe } from './motion.js';
 
 const TAU = Math.PI * 2;
@@ -17,25 +21,7 @@ const MAX_SCALE = 3.2;
 const ROTATE_PER_PX = 0.0035;   // 拖拽 1px 转多少弧度
 const ENERGY_DECAY = 0.92;      // 流式脉冲每帧衰减系数
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function next() {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-// 星色：少数偏暖、少数偏冷，多数接近白
-function starColor(hue) {
-  if (hue < 0.16) return [255, 224, 190];
-  if (hue > 0.86) return [198, 218, 255];
-  return [238, 235, 228];
-}
 
 export class StarMap {
   constructor({ background, links, nodes, hitLayer, onSelect, onHover }) {
@@ -68,8 +54,7 @@ export class StarMap {
 
     // 观测相机：缩放、旋转、平移（世界坐标原点在屏幕中心）
     this.camera = { scale: 1, rotation: 0, tx: 0, ty: 0 };
-    this.stars = [];
-    this.starSeed = 0;
+    this.maxHits = 1;              // 全图最大命中数：星等（点大小/星芒长度）的基准
 
     // 流式脉冲能量：0..1，随每个提交的字符批次抬升、逐帧衰减（P3）
     this.energy = 0;
@@ -91,6 +76,7 @@ export class StarMap {
     this.nodes = (payload.nodes || []).map((n) => ({ ...n }));
     this.edges = (payload.edges || []).map((e) => ({ ...e }));
     this.byName = new Map(this.nodes.map((n) => [n.id, n]));
+    this.maxHits = Math.max(1, ...this.nodes.map((n) => n.hits || 1));
     this.dirtyBackground = true;
     this.resize();
     return this;
@@ -217,28 +203,8 @@ export class StarMap {
       if (ctx && ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     this.dirtyBackground = true;
-    this.buildStars();
     this.draw();
     this.syncHotspots();
-  }
-
-  /** 程序化星表：固定 seed，刷新不变。星点数量随视口面积走。 */
-  buildStars() {
-    const area = this.width * this.height;
-    // (待补充：可见星点数量/密度策略) 当前按面积密度取 480–1200 颗
-    const count = clamp(Math.round(area / 1500), 480, 1200);
-    const rng = mulberry32(20261018);
-    const stars = [];
-    for (let i = 0; i < count; i += 1) {
-      // 归一化天空坐标：[-1,1] 覆盖视口（缩放/旋转在绘制时按相机施加）
-      const nx = rng() * 2 - 1;
-      const ny = rng() * 2 - 1;
-      // 星等按幂律：暗星多、亮星少，这样才像真实星野而不是均匀噪点
-      const mag = Math.pow(rng(), 2.4);
-      stars.push({ nx, ny, mag, hue: rng() });
-    }
-    this.stars = stars;
-    this.starSeed = Math.round(area);
   }
 
   /** 概念节点的世界坐标（px，相对屏幕中心）。 */
@@ -247,95 +213,113 @@ export class StarMap {
     return this.applyCamera(node.x * (this.width / 2) * pad, node.y * (this.height / 2) * pad);
   }
 
-  starPoint(star) {
-    return this.applyCamera(star.nx * (this.width / 2), star.ny * (this.height / 2));
+  /** 星等：0..1，由该概念在语料里的命中块数决定（命中越多越大越亮）。 */
+  magnitude(node) {
+    const h = Math.max(0, Math.min(1, Math.sqrt((node.hits || 1) / this.maxHits)));
+    return h;
   }
 
+  /** 视星等 → 点半径（真实星图上「星等越高点越大」，这里量纲换算到 1–3.4px）。 */
   radius(node) {
     const axis = (this.payload?.axes || []).includes(node.id);
-    const base = Math.sqrt(Math.max(node.hits || 1, 1));
-    return Math.max(1.5, Math.min(5, 1.2 + base * 0.22)) + (axis ? 0.8 : 0);
+    return 1.3 + this.magnitude(node) * 2.6 + (axis ? 0.4 : 0);
   }
 
-  /** 背景层：银河带 + 恒星 + 概念图的隐约结构线（固定 seed）。 */
+  /** 星芒/刻线的长度：亮星更长。这是非圆形的层次手段（不用光晕）。 */
+  tickLength(node) {
+    return 2.5 + this.magnitude(node) * 9.5;
+  }
+
+  /** 背景层：星图图版（plate）的家具——外框、经纬网格、边缘刻度。
+   *  这里**不画任何星点**：星图上的每个点都必须是概念节点（见 drawNodes）。 */
   drawBackground() {
     const ctx = this.bg.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // 银河：一条随相机一起转的稀薄星尘带
-    const bandAngle = this.camera.rotation - 0.52;
-    ctx.save();
-    ctx.translate(this.width / 2 + this.camera.tx, this.height / 2 + this.camera.ty);
-    ctx.rotate(bandAngle);
-    const bandLen = Math.hypot(this.width, this.height) * 1.1 * this.camera.scale;
-    const bandW = this.height * 0.34 * this.camera.scale;
-    const grad = ctx.createLinearGradient(0, -bandW, 0, bandW);
-    grad.addColorStop(0, 'rgba(150, 168, 205, 0)');
-    grad.addColorStop(0.5, 'rgba(168, 182, 214, 0.085)');
-    grad.addColorStop(1, 'rgba(150, 168, 205, 0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(-bandLen / 2, -bandW, bandLen, bandW * 2);
-    ctx.restore();
+    const W = this.width;
+    const H = this.height;
+    const ink = (a) => 'rgba(196, 206, 226, ' + (a * this.dim).toFixed(3) + ')';
 
-    // 恒星：按星等给半径、亮度、星芒。
-    // 拖拽/缩放时交错取样并跳过光晕，静止后补画完整细节（交互流畅优先）。
-    const lod = this.interacting;
-    const stepRatio = lod ? 2 : 1;
-    for (let i = 0; i < this.stars.length; i += stepRatio) {
-      const star = this.stars[i];
-      const p = this.starPoint(star);
-      if (p.x < -8 || p.y < -8 || p.x > this.width + 8 || p.y > this.height + 8) continue;
-      const mag = star.mag;
-      const [r, g, b] = starColor(star.hue);
-      const alpha = (0.2 + mag * 0.78) * this.dim;
-      const radius = 0.45 + mag * 1.45;
+    // 图版外框：四条细线 + 四角加粗的角标（印刷星图的版式）
+    const inset = 18;
+    ctx.strokeStyle = ink(0.16);
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(inset, inset); ctx.lineTo(W - inset, inset);
+    ctx.lineTo(W - inset, H - inset); ctx.lineTo(inset, H - inset);
+    ctx.closePath();
+    ctx.stroke();
 
-      if (mag > 0.72 && !lod) {
-        // 亮星：先铺一层光晕
-        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 6);
-        glow.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',' + (0.34 * alpha).toFixed(3) + ')');
-        glow.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius * 6, 0, TAU);
-        ctx.fill();
-      }
-
+    // 角标：每角两段短线，比外框亮一档
+    ctx.strokeStyle = ink(0.3);
+    ctx.lineWidth = 1;
+    const corner = 14;
+    for (const [cx, cy, dx, dy] of [
+      [inset, inset, 1, 1], [W - inset, inset, -1, 1],
+      [inset, H - inset, 1, -1], [W - inset, H - inset, -1, -1],
+    ]) {
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
-      ctx.arc(p.x, p.y, radius, 0, TAU);
-      ctx.fill();
-
-      if (mag > 0.88 && !lod) {
-        // 最亮的几颗加四芒星芒：一眼就能认出这是星图
-        const spike = radius * (4.5 + mag * 3);
-        ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (0.3 * alpha).toFixed(3) + ')';
-        ctx.lineWidth = 0.7;
-        ctx.beginPath();
-        ctx.moveTo(p.x - spike, p.y);
-        ctx.lineTo(p.x + spike, p.y);
-        ctx.moveTo(p.x, p.y - spike);
-        ctx.lineTo(p.x, p.y + spike);
-        ctx.stroke();
-      }
+      ctx.moveTo(cx, cy + dy * corner);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + dx * corner, cy);
+      ctx.stroke();
     }
 
-    // 概念图的结构线：很低但可见，像星表连线
-    if (this.nodes.length) {
-      ctx.strokeStyle = 'rgba(186, 196, 214, ' + (0.05 * this.dim).toFixed(3) + ')';
-      ctx.lineWidth = 0.6;
-      for (const edge of this.edges) {
-        const a = this.byName.get(edge.source);
-        const b = this.byName.get(edge.target);
-        if (!a || !b) continue;
-        const p1 = this.point(a);
-        const p2 = this.point(b);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
+    // 经纬网格：等距细线，随相机一起转/缩放（像星图的坐标网）
+    const cols = 8;
+    const rows = 5;
+    ctx.strokeStyle = ink(0.055);
+    ctx.lineWidth = 0.6;
+    for (let i = 1; i < cols; i += 1) {
+      const x = (W / cols) * i;
+      const a = this.applyCamera(x - W / 2, -H / 2);
+      const b = this.applyCamera(x - W / 2, H / 2);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    for (let j = 1; j < rows; j += 1) {
+      const y = (H / rows) * j;
+      const a = this.applyCamera(-W / 2, y - H / 2);
+      const b = this.applyCamera(W / 2, y - H / 2);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    // 边缘刻度：底边一列短竖线，逢网格交点加长——真实星图的坐标尺
+    ctx.strokeStyle = ink(0.22);
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i <= cols * 4; i += 1) {
+      const x = (W / (cols * 4)) * i;
+      if (x < inset || x > W - inset) continue;
+      const long = i % 4 === 0;
+      const len = long ? 10 : 5;
+      ctx.beginPath();
+      ctx.moveTo(x, H - inset);
+      ctx.lineTo(x, H - inset - len);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, inset);
+      ctx.lineTo(x, inset + len);
+      ctx.stroke();
+    }
+    for (let j = 0; j <= rows * 4; j += 1) {
+      const y = (H / (rows * 4)) * j;
+      if (y < inset || y > H - inset) continue;
+      const long = j % 4 === 0;
+      const len = long ? 10 : 5;
+      ctx.beginPath();
+      ctx.moveTo(inset, y);
+      ctx.lineTo(inset + len, y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(W - inset, y);
+      ctx.lineTo(W - inset - len, y);
+      ctx.stroke();
     }
   }
 
@@ -346,7 +330,7 @@ export class StarMap {
     const lit = [...this.lit].filter((n) => this.byName.has(n));
     if (lit.length < 2) return;
     // 范围查询的星座轨迹：沿剪枝边把已点亮节点连起来
-    ctx.strokeStyle = 'rgba(214, 208, 194, ' + (0.16 * this.dim).toFixed(3) + ')';
+    ctx.strokeStyle = 'rgba(206, 216, 236, ' + (0.22 * this.dim).toFixed(3) + ')';
     ctx.lineWidth = 0.8;
     const litSet = new Set(lit);
     for (const edge of this.edges) {
@@ -360,54 +344,55 @@ export class StarMap {
     }
   }
 
+  /** 流式反馈：非圆形的「扫读」——线性提亮 + 一条扫描线 + 底边量程刻度。 */
+  drawStreamFeedback(ctx, now) {
+    if (this.energy <= 0.01) return;
+    const strength = this.energy * (0.55 + 0.45 * this.dim);
+    const W = this.width;
+    const H = this.height;
+
+    // ① 整屏线性提亮（自上而下的线性渐变；不是径向、不是辉光块）
+    const wash = ctx.createLinearGradient(0, 0, 0, H);
+    wash.addColorStop(0, 'rgba(198, 210, 236, ' + (0.085 * strength).toFixed(3) + ')');
+    wash.addColorStop(0.55, 'rgba(184, 198, 228, ' + (0.045 * strength).toFixed(3) + ')');
+    wash.addColorStop(1, 'rgba(168, 184, 216, 0)');
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, W, H);
+
+    // ② 扫描线：一条 1px 横向细线自上而下走，像读片机扫过星图
+    const sweep = ((now * 0.07) % (H + 140)) - 70;
+    ctx.fillStyle = 'rgba(216, 228, 250, ' + (0.36 * strength).toFixed(3) + ')';
+    ctx.fillRect(0, Math.round(sweep), W, 1);
+
+    // ③ 底边量程：一列刻度，读到哪亮到哪（进度感，而不是一团光）
+    const ticks = 72;
+    const head = ((now * 0.09) % W);
+    const base = H - 18;
+    for (let i = 0; i < ticks; i += 1) {
+      const x = (W / ticks) * i;
+      const d = Math.abs(x - head) / W;
+      const a = Math.max(0, 0.5 - d * 1.1) * strength;
+      if (a <= 0.012) continue;
+      const long = i % 6 === 0;
+      ctx.fillStyle = 'rgba(208, 220, 244, ' + a.toFixed(3) + ')';
+      ctx.fillRect(x, base - (long ? 9 : 5), 1, long ? 9 : 5);
+    }
+  }
+
   drawNodes(now = performance.now()) {
     const ctx = this.nodeCanvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, this.width, this.height);
     const reduced = this.reduced;
+    const lod = this.interacting;
 
-    // P3：流式脉冲——中心一团极淡的辉光 + 几颗随机被「点亮」的星，随输出节奏呼吸
-    if (this.energy > 0.01) {
-      const e = this.energy;
-      // 阅读时（dim 低）脉冲弱一档，避免盖住正文
-      const strength = e * (0.6 + 0.4 * this.dim);
-      // ① 整屏极淡提亮：报告「背景在呼吸」最直接的信号
-      ctx.fillStyle = 'rgba(198, 210, 235, ' + (0.035 * strength).toFixed(3) + ')';
-      ctx.fillRect(0, 0, this.width, this.height);
+    this.drawStreamFeedback(ctx, now);
 
-      // ② 中心辉光：随输出节奏轻微起伏
-      const wobble = 0.85 + 0.15 * Math.sin(now * 0.012);
-      const glow = ctx.createRadialGradient(
-        this.width / 2, this.height / 2, 0,
-        this.width / 2, this.height / 2, Math.hypot(this.width, this.height) * 0.62,
-      );
-      glow.addColorStop(0, 'rgba(226, 232, 245, ' + (0.17 * strength * wobble).toFixed(3) + ')');
-      glow.addColorStop(0.45, 'rgba(210, 220, 240, ' + (0.075 * strength * wobble).toFixed(3) + ')');
-      glow.addColorStop(1, 'rgba(200, 210, 235, 0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, this.width, this.height);
-
-      // ③ 闪烁星：每帧换一批被点亮的星，读起来像「星野在回应输出」
-      if (this.stars.length) {
-        const flickers = Math.round(10 + strength * 34);
-        for (let i = 0; i < flickers; i += 1) {
-          const star = this.stars[(now * 0.06 + i * 137) % this.stars.length | 0];
-          if (!star || star.mag < 0.45) continue;
-          const p = this.starPoint(star);
-          const radius = 0.7 + star.mag * 3.2 * strength;
-          ctx.beginPath();
-          ctx.fillStyle = 'rgba(238, 244, 255, ' + (0.85 * strength).toFixed(3) + ')';
-          ctx.arc(p.x, p.y, radius, 0, TAU);
-          ctx.fill();
-        }
-      }
-    }
-
-    // 命中连线画在节点下面：极细、随 age 淡出
+    // 命中连线画在节点下面：极细、随 age 淡出（直线，不是光）
     for (const link of this.linksTo) {
       const age = (now - link.born) / 600;
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(233, 229, 219, ' + (0.12 * (1 - age) * this.dim).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(228, 234, 246, ' + (0.14 * (1 - age) * this.dim).toFixed(3) + ')';
       ctx.lineWidth = 0.6;
       ctx.moveTo(link.from.x, link.from.y);
       ctx.lineTo(link.to.x, link.to.y);
@@ -415,52 +400,74 @@ export class StarMap {
     }
 
     for (const node of this.nodes) {
-      const p = this.point(node);
-      const r = this.radius(node);
       const isLit = this.lit.has(node.id);
       const isHalo = !isLit && this.halo.has(node.id);
       const isHover = this.hovered === node.id || this.focused === node.id;
+      // 未命中 = 完全不可见：不画点、不画刻度、不画标签
+      if (!isLit && !isHalo && !isHover) continue;
 
-      let alpha = 0;
-      if (isLit) alpha = 0.78;
-      else if (isHalo) alpha = 0.32;
-      else if (isHover) alpha = 0.6;
-      if (!alpha) continue;
-      alpha *= this.dim;
+      const p = this.point(node);
+      if (p.x < -20 || p.y < -20 || p.x > this.width + 20 || p.y > this.height + 20) continue;
 
+      const mag = this.magnitude(node);
+      const r = this.radius(node);
+      const base = isLit ? 0.95 : isHalo ? 0.34 : 0.55;
+      const alpha = base * this.dim;
+
+      // 点亮动画：刻度从 0 长到全长（非圆形的「点亮」表现）
       const pulse = this.pulses.get(node.id);
-      if (pulse && !reduced) {
-        const t = Math.min(1, (now - pulse) / 620);
-        const grow = 1 + t * 2.4;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(232, 228, 216, ' + (0.3 * (1 - t) * this.dim).toFixed(3) + ')';
-        ctx.lineWidth = 0.9;
-        ctx.arc(p.x, p.y, r * grow, 0, TAU);
-        ctx.stroke();
-      }
+      const grow = pulse && !reduced ? Math.min(1, (now - pulse) / 620) : 1;
 
-      // 点亮节点给一圈光晕：在星野里更容易认出来
-      if (isLit) {
-        const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 7);
-        halo.addColorStop(0, 'rgba(236, 240, 250, ' + (0.3 * this.dim).toFixed(3) + ')');
-        halo.addColorStop(1, 'rgba(236, 240, 250, 0)');
-        ctx.fillStyle = halo;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r * 7, 0, TAU);
-        ctx.fill();
-      }
-
+      // 实心点：星图符号本身（1–3.4px 的圆点，没有渐变、没有外发光）
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(240, 237, 228, ' + alpha.toFixed(3) + ')';
-      ctx.arc(p.x, p.y, r, 0, TAU);
+      ctx.fillStyle = 'rgba(238, 243, 251, ' + (alpha * (0.55 + 0.45 * grow)).toFixed(3) + ')';
+      ctx.arc(p.x, p.y, r * (0.55 + 0.45 * grow), 0, TAU);
       ctx.fill();
 
-      if (this.favorite.has(node.id)) {
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(240, 237, 228, ' + (0.28 * this.dim).toFixed(3) + ')';
+      // 四芒刻度：真实星图用刻线长度区分亮星（亮星更长）
+      const t = this.tickLength(node) * grow;
+      const bright = mag > 0.55;
+      ctx.strokeStyle = 'rgba(228, 236, 250, ' + (alpha * 0.85).toFixed(3) + ')';
+      ctx.lineWidth = bright ? 1 : 0.7;
+      ctx.beginPath();
+      ctx.moveTo(p.x - r - t, p.y); ctx.lineTo(p.x - r - 1.1, p.y);
+      ctx.moveTo(p.x + r + 1.1, p.y); ctx.lineTo(p.x + r + t, p.y);
+      ctx.moveTo(p.x, p.y - r - t); ctx.lineTo(p.x, p.y - r - 1.1);
+      ctx.moveTo(p.x, p.y + r + 1.1); ctx.lineTo(p.x, p.y + r + t);
+      ctx.stroke();
+
+      // 最亮的一档再加斜向刻度（8 芒），仍然是线段
+      if (bright && !lod) {
+        const d = t * 0.55;
         ctx.lineWidth = 0.7;
-        ctx.arc(p.x, p.y, r + 3.5, 0, TAU);
+        ctx.beginPath();
+        ctx.moveTo(p.x - r - d, p.y - r - d); ctx.lineTo(p.x - r - d * 0.35, p.y - r - d * 0.35);
+        ctx.moveTo(p.x + r + d * 0.35, p.y + r + d * 0.35); ctx.lineTo(p.x + r + d, p.y + r + d);
+        ctx.moveTo(p.x + r + d, p.y - r - d); ctx.lineTo(p.x + r + d * 0.35, p.y - r - d * 0.35);
+        ctx.moveTo(p.x - r - d * 0.35, p.y + r + d * 0.35); ctx.lineTo(p.x - r - d, p.y + r + d);
         ctx.stroke();
+      }
+
+      // 悬停 / 键盘聚焦：四角括线（标注框，不是光圈）
+      if (isHover && !lod) {
+        const b = r + 7;
+        const len = 4;
+        ctx.strokeStyle = 'rgba(232, 238, 248, ' + (0.65 * this.dim).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x - b, p.y - b + len); ctx.lineTo(p.x - b, p.y - b); ctx.lineTo(p.x - b + len, p.y - b);
+        ctx.moveTo(p.x + b - len, p.y - b); ctx.lineTo(p.x + b, p.y - b); ctx.lineTo(p.x + b, p.y - b + len);
+        ctx.moveTo(p.x - b, p.y + b - len); ctx.lineTo(p.x - b, p.y + b); ctx.lineTo(p.x - b + len, p.y + b);
+        ctx.moveTo(p.x + b - len, p.y + b); ctx.lineTo(p.x + b, p.y + b); ctx.lineTo(p.x + b, p.y + b - len);
+        ctx.stroke();
+      }
+
+      // 收藏：一个小方框（非圆形）
+      if (this.favorite.has(node.id)) {
+        const s = r + 4;
+        ctx.strokeStyle = 'rgba(236, 242, 252, ' + (0.3 * this.dim).toFixed(3) + ')';
+        ctx.lineWidth = 0.7;
+        ctx.strokeRect(p.x - s, p.y - s, s * 2, s * 2);
       }
     }
   }

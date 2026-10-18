@@ -1,18 +1,21 @@
-// P1/P2/P3 的可测部分：相机变换、星表规模与亮度分布、流式脉冲能量。
-// 用记录型 canvas 上下文替身，不依赖真实 canvas 实现。
-import { describe, expect, it, vi } from 'vitest';
+// 星图的三条硬约束：① 只画可查询的概念节点（没有装饰星）；② 未命中完全不可见；
+// ③ 全图不使用圆形发光/径向渐变；另外覆盖 P2 相机与 P3 流式反馈。
+import { describe, expect, it } from 'vitest';
 import { StarMap } from '../src/lib/starmap.js';
 
 function recorder() {
-  const calls = { arc: [], spike: 0, rects: 0, gradients: 0 };
+  const calls = { arc: [], line: 0, rects: 0, radial: 0, linear: 0, strokeRect: 0 };
   const gradient = { addColorStop: () => {} };
   const ctx = {
     clearRect: () => {}, save: () => {}, restore: () => {}, translate: () => {}, rotate: () => {},
-    setTransform: () => {}, beginPath: () => {}, fill: () => {}, stroke: () => {},
+    setTransform: () => {}, beginPath: () => {}, closePath: () => {}, fill: () => {},
+    stroke: () => { calls.line += 1; },
     moveTo: () => {}, lineTo: () => {},
     fillRect: () => { calls.rects += 1; },
-    createLinearGradient: () => { calls.gradients += 1; return gradient; },
-    createRadialGradient: () => { calls.gradients += 1; return gradient; },
+    strokeRect: () => { calls.strokeRect += 1; },
+    createLinearGradient: () => { calls.linear += 1; return gradient; },
+    // 出现径向渐变 = 违反「禁止圆形发光」，计数后由测试断言为 0
+    createRadialGradient: () => { calls.radial += 1; return gradient; },
     arc: (x, y, r) => calls.arc.push({ x, y, r }),
   };
   return { ctx, calls };
@@ -28,6 +31,13 @@ function fakeCanvas(rec, width = 1280, height = 800) {
   };
 }
 
+const NODES = [
+  { id: '大他者', x: -0.4, y: 0.2, hits: 229, aliases: [] },
+  { id: '客体小a', x: 0.3, y: -0.1, hits: 120, aliases: [] },
+  { id: '象征界', x: 0.5, y: 0.4, hits: 40, aliases: [] },
+  { id: '主体', x: -0.1, y: -0.5, hits: 8, aliases: [] },
+];
+
 function makeMap(width = 1280, height = 800) {
   const rec = recorder();
   const map = new StarMap({
@@ -38,29 +48,67 @@ function makeMap(width = 1280, height = 800) {
   });
   map.setData({
     version: 1, seed: 1, axes: [],
-    nodes: [{ id: 'a', x: 0, y: 0, hits: 100, aliases: [] }],
-    edges: [],
+    nodes: NODES,
+    edges: [{ source: '大他者', target: '客体小a', weight: 0.8 }],
   });
   return { map, rec };
 }
 
-describe('P1 恒星图', () => {
-  it('星表按视口面积生成，且暗星多于亮星', () => {
+describe('P1 星图只由概念节点构成', () => {
+  it('全量概念图先装载：183 类节点一次到位，不靠"背景星"补画面', () => {
     const { map } = makeMap();
-    expect(map.stars.length).toBeGreaterThanOrEqual(480);
-    const bright = map.stars.filter((s) => s.mag > 0.7).length;
-    const faint = map.stars.filter((s) => s.mag < 0.2).length;
-    expect(faint).toBeGreaterThan(bright);   // 幂律：暗星多
-    expect(bright).toBeGreaterThan(5);       // 但总要有几颗亮到能当坐标
+    expect(map.nodes).toHaveLength(NODES.length);
+    expect(map.maxHits).toBe(229);
+    // 装饰星表已被移除
+    expect(map.stars).toBeUndefined();
+    expect(typeof map.buildStars).toBe('undefined');
   });
 
-  it('背景层真的画了星（数量、星芒、银河带）', () => {
+  it('背景层不画任何星点：只有图版家具（框线 / 网格 / 刻度）', () => {
     const { map, rec } = makeMap();
     rec.calls.arc.length = 0;
+    rec.calls.line = 0;
     map.drawBackground();
-    expect(rec.calls.arc.length).toBeGreaterThanOrEqual(map.stars.length);
-    expect(rec.calls.rects).toBeGreaterThan(0);       // 银河带
-    expect(rec.calls.gradients).toBeGreaterThan(0);   // 亮星光晕
+    expect(rec.calls.arc).toHaveLength(0);     // 没有一个"星点"
+    expect(rec.calls.line).toBeGreaterThan(0); // 但有框线/网格/刻度
+  });
+
+  it('未命中的概念完全不可见：不画点、不画刻度', () => {
+    const { map, rec } = makeMap();
+    map.lit = new Set();
+    map.halo = new Set();
+    rec.calls.arc.length = 0;
+    rec.calls.line = 0;
+    map.drawNodes(0);
+    expect(rec.calls.arc).toHaveLength(0);
+    // 只剩可能存在的流式刻度（这里 energy=0，所以也不该有）
+    expect(rec.calls.line).toBe(0);
+  });
+
+  it('命中后才可见：画实心点 + 四芒刻度，亮星刻度更长', () => {
+    const { map, rec } = makeMap();
+    map.lit = new Set(['大他者', '主体']);
+    rec.calls.arc.length = 0;
+    rec.calls.line = 0;
+    map.drawNodes(0);
+    expect(rec.calls.arc).toHaveLength(2);          // 恰两个命中节点
+    expect(rec.calls.line).toBeGreaterThanOrEqual(2); // 每个节点一组四芒刻度
+    expect(map.tickLength(map.byName.get('大他者')))
+      .toBeGreaterThan(map.tickLength(map.byName.get('主体')));   // 星等越高刻度越长
+  });
+
+  it('全流程不使用径向渐变（禁止圆形发光）', () => {
+    const { map, rec } = makeMap();
+    map.lit = new Set(['大他者', '客体小a']);
+    map.energy = 0.9;
+    map.drawBackground();
+    map.drawLinks();
+    map.drawNodes(performance.now());
+    map.setHovered('大他者');
+    map.setFocused('大他者');
+    map.setFavorites(['客体小a']);
+    map.draw();
+    expect(rec.calls.radial).toBe(0);
   });
 });
 
@@ -76,61 +124,49 @@ describe('P2 缩放与旋转', () => {
     expect(back.y).toBeCloseTo(cursor.y, 3);
   });
 
-  it('缩放有上下限', () => {
+  it('缩放有上下限，拖拽改变旋转角，复位回到初始视角', () => {
     const { map } = makeMap();
     for (let i = 0; i < 40; i += 1) map.zoomAt(640, 400, -240);
     expect(map.camera.scale).toBeLessThanOrEqual(3.2);
     for (let i = 0; i < 80; i += 1) map.zoomAt(640, 400, 240);
     expect(map.camera.scale).toBeGreaterThanOrEqual(0.6);
-  });
 
-  it('拖拽改变旋转角，复位回到初始视角', () => {
-    const { map } = makeMap();
     map.rotateBy(120);
     expect(Math.abs(map.camera.rotation)).toBeGreaterThan(0.1);
-    map.zoomAt(100, 100, -200);
-    map.panBy(30, -20);
     map.resetCamera();
     expect(map.camera).toEqual({ scale: 1, rotation: 0, tx: 0, ty: 0 });
   });
 });
 
-describe('P3 流式脉冲', () => {
-  it('flash 抬升能量，空闲后逐帧衰减到 0 并停掉循环', () => {
+describe('P3 流式反馈（非圆形）', () => {
+  it('流式期间画线性提亮 + 扫描线 + 量程刻度，且没有径向渐变', () => {
+    const { map, rec } = makeMap();
+    map.stopLoop();
+
+    rec.calls.rects = 0;
+    rec.calls.linear = 0;
+    map.energy = 0;
+    map.drawNodes(0);
+    const idleRects = rec.calls.rects;
+
+    rec.calls.rects = 0;
+    rec.calls.linear = 0;
+    map.energy = 0.9;
+    map.drawNodes(1000);
+    expect(rec.calls.linear).toBeGreaterThanOrEqual(1);   // 线性渐变做整体提亮
+    expect(rec.calls.rects).toBeGreaterThan(idleRects);   // 额外多出扫描线与刻度
+    expect(rec.calls.radial).toBe(0);                    // 没有圆形辉光
+  });
+
+  it('能量衰减到 0 后停掉 rAF', () => {
     const { map } = makeMap();
     map.stopLoop();
     map.flash(6);
     expect(map.energy).toBeGreaterThan(0.05);
     let guard = 0;
-    while (map.energy > 0.01 && guard < 400) {
-      map.step();
-      guard += 1;
-    }
-    expect(map.energy).toBeLessThan(0.02);
-    map.step();                           // 再走一帧：能量归零 → 循环退出
+    while (map.energy > 0.01 && guard < 400) { map.step(); guard += 1; }
+    map.step();
     expect(map.energy).toBe(0);
-    expect(map.unsubscribe).toBe(null);   // 静止即停 rAF
-  });
-
-  it('脉冲期间会铺一层辉光并点亮额外的闪烁星', () => {
-    const { map, rec } = makeMap();
-    map.stopLoop();
-
-    // 静止：只画节点（没有任何 fillRect 辉光）
-    rec.calls.arc.length = 0;
-    rec.calls.rects = 0;
-    map.energy = 0;
-    map.drawNodes(0);
-    const idleArcs = rec.calls.arc.length;
-    const idleRects = rec.calls.rects;
-
-    // 脉冲：整屏提亮 + 中心辉光（两次 fillRect）+ 一批闪烁星
-    rec.calls.arc.length = 0;
-    rec.calls.rects = 0;
-    map.energy = 0.9;
-    map.drawNodes(0);
-    expect(rec.calls.rects).toBeGreaterThanOrEqual(2);
-    expect(rec.calls.rects).toBeGreaterThan(idleRects);
-    expect(rec.calls.arc.length).toBeGreaterThan(idleArcs);
+    expect(map.unsubscribe).toBe(null);
   });
 });

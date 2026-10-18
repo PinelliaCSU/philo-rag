@@ -1,7 +1,12 @@
-// 术语匹配：只认标准名与多字符别名。
+// 术语匹配与「术语注解」。
 //
-// 单字符别名（「道」「理」这类）一旦参与匹配，几乎每个句子里都有它——
-// 词典层早就有同样的守卫（lexicon 的 guard），视觉层沿用同一套判断。
+// 注解必须由渲染产出，而不是渲染之后去改 DOM：
+//   · {@html} 块归 Svelte 所有，块一旦重新求值（引用/点亮/文本变化）整块被替换，
+//     注入进去的 span 会随之消失，而补标的 $effect 又不会重跑 → 成段丢注解；
+//   · 所以这里改成和「引用点」同一套做法：先在文本层插哨兵 ⟦t:名称⟧…⟦/t⟧，
+//     走完 Markdown 之后再换成 <span class="term-hit" data-term="…">。
+
+import { protectSegments } from './citations.js';
 
 export function buildTermIndex(concepts) {
   const entries = [];
@@ -61,45 +66,50 @@ export function topTerms(hits, limit = 8) {
 export function indexFromConcepts(list) {
   return buildTermIndex((list || []).map((c) => ({ name: c.name, aliases: c.aliases || [] })));
 }
-/** 在已渲染的正文里标出术语命中（只标每个词首次出现），供星图连线与悬停使用。
- *  在 DOM 文本节点上做，而不是在 Markdown 文本上插标记——插标记会影响标题与列表识别。 */
-export function markTermHits(root, names, index) {
-  if (!root || !names || !names.length) return 0;
-  const wanted = new Set(names);
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-      if (node.parentElement && node.parentElement.closest('.cite-dot, code, .term-hit')) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  const textNodes = [];
-  while (walker.nextNode()) textNodes.push(walker.currentNode);
 
-  let marked = 0;
-  for (const node of textNodes) {
-    if (!marked === 0 && marked >= names.length) break;
-    const hits = findTerms(node.nodeValue, index).filter((h) => wanted.has(h.name));
-    if (!hits.length) continue;
-    const seen = new Set();
-    const frag = document.createDocumentFragment();
-    let cursor = 0;
-    for (const hit of hits) {
-      if (seen.has(hit.name)) continue;     // 每个词只标第一次出现
-      seen.add(hit.name);
-      frag.append(node.nodeValue.slice(cursor, hit.start));
-      const span = document.createElement('span');
-      span.className = 'term-hit';
-      span.dataset.term = hit.name;
-      span.textContent = node.nodeValue.slice(hit.start, hit.end);
-      frag.append(span);
-      cursor = hit.end;
-      marked += 1;
-    }
-    frag.append(node.nodeValue.slice(cursor));
-    node.replaceWith(frag);
+// 哨兵：⟦t:名称⟧命中文本⟦/t⟧。名称里的哨兵字符会被剔除，避免自伤。
+const OPEN = '⟦t:';
+const CLOSE = '⟧';
+const TOKEN = /⟦t:([^⟧]+)⟧([\s\S]*?)⟦\/t⟧/g;
+
+/**
+ * 给命中的术语插哨兵（只标 names 里的词，每个块内每词只标第一次出现）。
+ * 保护代码块 / 行内代码 / 链接：它们里面的文字不算「正文术语」。
+ */
+export function annotateTerms(text, names, index) {
+  const source = String(text == null ? '' : text);
+  const wanted = new Set(names || []);
+  if (!source || !wanted.size || !index || !index.length) return source;
+
+  const { text: guarded, restore } = protectSegments(source);
+  const hits = findTerms(guarded, index).filter((hit) => wanted.has(hit.name));
+  if (!hits.length) return source;
+
+  const seen = new Set();
+  let out = '';
+  let cursor = 0;
+  for (const hit of hits) {
+    if (seen.has(hit.name)) continue;
+    seen.add(hit.name);
+    out += guarded.slice(cursor, hit.start)
+      + OPEN + hit.name + CLOSE
+      + guarded.slice(hit.start, hit.end)
+      + '⟦/t⟧';
+    cursor = hit.end;
   }
-  return marked;
+  out += guarded.slice(cursor);
+  return restore(out);
+}
+
+/** 哨兵 → 可点击的术语注解（第 5 步，与引用点同一层）。 */
+export function replaceTermTokens(html) {
+  return String(html || '').replace(TOKEN, (_, name, inner) =>
+    '<span class="term-hit" data-term="' + escapeAttr(name) + '">' + inner + '</span>');
+}
+
+function escapeAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
 }
