@@ -3,16 +3,20 @@
    「极淡」一律用低不透明度实现，但可读性有一条兜底线：正文 ≥ 4.5:1，
    极淡元素在 focus / prefers-contrast: more 下提高一档。 */
 
+/* 亮度基准（P5）：原来整页压在 #0d0c0b 上、极淡元素只有 0.12–0.4 的不透明度，
+   在普通显示器上几乎看不见。这里整体抬一档：
+   正文 --ink 提到接近纯白，极淡三档各加 0.12–0.2，背景底色提亮约 +10 级。
+   正文对比度仍在 12:1 以上（远高于 4.5:1 的底线）。 */
 :root {
-  --ink: #e9e5db;
-  --ink-soft: rgba(233, 229, 219, 0.72);
-  --faint: rgba(233, 229, 219, 0.4);
-  --fainter: rgba(233, 229, 219, 0.22);
-  --ghost: rgba(233, 229, 219, 0.12);
-  --line: rgba(233, 229, 219, 0.14);
-  --bg-deep: #0d0c0b;
-  --bg-mid: #161412;
-  --bg-warm: #1b1714;
+  --ink: #f4f0e7;
+  --ink-soft: rgba(244, 240, 231, 0.84);
+  --faint: rgba(244, 240, 231, 0.62);
+  --fainter: rgba(244, 240, 231, 0.46);
+  --ghost: rgba(244, 240, 231, 0.2);
+  --line: rgba(244, 240, 231, 0.26);
+  --bg-deep: #121110;
+  --bg-mid: #1c1916;
+  --bg-warm: #262019;
   --serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
   --ui: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   --measure: 700px;
@@ -31,7 +35,8 @@ body {
   min-width: var(--min-w);
   min-height: var(--min-h);
   background:
-    radial-gradient(120% 90% at 50% 42%, var(--bg-warm) 0%, var(--bg-mid) 38%, var(--bg-deep) 100%);
+    radial-gradient(120% 90% at 50% 42%, var(--bg-warm) 0%, var(--bg-mid) 40%, var(--bg-deep) 100%),
+    var(--bg-deep);
   color: var(--ink);
   font-family: var(--serif);
   -webkit-font-smoothing: antialiased;
@@ -44,7 +49,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.018;
+  opacity: 0.03;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='20261018'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>");
 }
 
@@ -76,8 +81,13 @@ button, input, textarea {
   position: fixed;
   inset: 0;
   z-index: 0;
-  pointer-events: none;      /* 不拦截点击：整页只有一个输入入口 */
+  /* 星图现在是「可观察的图像」：滚轮缩放、拖拽旋转都要它收事件。
+     空白处单击仍然把焦点交回输入线，整页「只有一个输入入口」的契约不变。 */
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
 }
+.starfield.dragging { cursor: grabbing; }
 .starfield:focus-visible { outline-offset: -1px; }
 .starfield .layer {
   position: absolute;
@@ -97,6 +107,20 @@ button, input, textarea {
   cursor: pointer;
 }
 .star-hotspot:hover { background: radial-gradient(circle, rgba(233,229,219,0.06), transparent 70%); }
+
+/* 观测提示：一条极淡说明 + 当前缩放比例，不拦截事件 */
+.sky-hint {
+  position: fixed;
+  right: 22px;
+  bottom: 14px;
+  margin: 0;
+  font-family: var(--ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--fainter);
+  pointer-events: none;
+  user-select: none;
+}
 
 .star-label {
   position: absolute;
@@ -153,7 +177,11 @@ button, input, textarea {
   align-items: center;
   width: var(--measure);
   transform: translateY(-4vh);
+  pointer-events: none;            /* 中心留白也能拖星图 */
 }
+.home .input-holder,
+.home .example-card,
+.home .last-line { pointer-events: auto; }
 
 .glyph {
   font-size: 1.1rem;

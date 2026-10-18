@@ -126,7 +126,14 @@ export async function boot() {
 // --------------------------------------------------------------------------- //
 // 提问：SSE → 缓冲 → rAF 提交 → 定型
 // --------------------------------------------------------------------------- //
+// 后端（Python）给的是 CRLF。块级切分、段落切分、Markdown 都要按 LF 判断，
+// 所以在入口统一归一：归一之后 "\n\n" / /\n[ \t]*\n/ 才是真的空行。
+const CRLF = /\r\n?/g;
+const normalizeStream = (text) => String(text == null ? '' : text).replace(CRLF, '\n');
+const BLANK_LINE = /\n[ \t]*\n/;
+
 let incoming = '';
+let settled = false;
 let consumed = 0;
 let pumpStop = null;
 let settleTimer = 0;
@@ -176,9 +183,12 @@ function pump() {
     consumed += chunk.length;
     app.runLen = chunk.length;
     app.tail += chunk;
+    // 每个提交批次给背景一次脉冲：星图的闪烁因此与输出节奏同频
+    if (starBridge.flash) starBridge.flash(chunk.length);
     // 块边界：把已完成的块提交为 html，只留最后一块继续长
-    if (app.tail.includes('\n\n')) {
-      const parts = app.tail.split(/\n{2,}/);
+    // （用 /\n[ \t]*\n/ 而不是 '\n\n'：空行里可能带缩进）
+    if (BLANK_LINE.test(app.tail)) {
+      const parts = app.tail.split(BLANK_LINE);
       const rest = parts.pop() || '';
       for (const block of parts) {
         if (block.trim()) app.blocks.push(block);   // 存原文：渲染在组件里做一次
@@ -189,8 +199,15 @@ function pump() {
   });
 }
 
+/** 定型时取最长的一份文本：answerRaw / 完整缓冲 / 已提交尾巴，谁最长用谁。 */
+function longestText(...candidates) {
+  let best = '';
+  for (const c of candidates) if (typeof c === 'string' && c.length > best.length) best = c;
+  return best;
+}
+
 function finishAuthoritative() {
-  const text = app.answerRaw || app.tail;
+  const text = longestText(app.answerRaw, incoming, app.tail);
   app.blocks = splitBlocks(text);
   app.tail = '';
   app.runLen = 0;
@@ -206,8 +223,8 @@ function applyMeta(meta) {
   app.strategy = meta.strategy || app.strategy;
   app.skipped = !!meta.skipped || meta.strategy === 'gate';
   if (meta.strategy === 'gate' && meta.answer) {
-    app.answerRaw = meta.answer;
-    app.blocks = splitBlocks(meta.answer);
+    app.answerRaw = normalizeStream(meta.answer);
+    app.blocks = splitBlocks(app.answerRaw);
     app.tail = '';
     app.done = true;
     app.streaming = false;
@@ -244,6 +261,7 @@ export function attachStar(handle) {
   starBridge.setLit = handle.setLit;
   starBridge.connect = handle.connect;
   starBridge.setFavorites = handle.setFavorites;
+  starBridge.flash = handle.flash;
   if (app.lit.length) handle.setLit(app.lit);
 }
 
@@ -280,6 +298,7 @@ export async function ask(question, { strategy = 'auto', followup = false } = {}
     app.prevQuestion = '';
   }
 
+  settled = false;
   resetPaper();
   app.paperKind = 'answer';
   app.question = text;
@@ -308,10 +327,11 @@ export async function ask(question, { strategy = 'auto', followup = false } = {}
           }
         },
         onDelta: (delta) => {
-          incoming += delta;
+          incoming += normalizeStream(delta);
         },
         onDone: (event) => {
-          const final = String(event.answer || '');
+          settled = true;
+          const final = normalizeStream(event.answer || '');
           if (final) app.answerRaw = final;
           app.citations = event.citations || app.citations;
           incoming = final || incoming;
@@ -332,11 +352,22 @@ export async function ask(question, { strategy = 'auto', followup = false } = {}
           }, wait);
         },
         onError: (detail) => {
+          settled = true;
           clearStatusTimers();
           stopPump();
           app.streaming = false;
           app.status = '';
           app.error = detail || '这次没有接通。Enter 重试';
+        },
+        onClose: () => {
+          // 流结束了却没有 done/error：连接被中断。保留已收到的文字，并明确告知（§8.4）
+          if (settled) return;
+          settled = true;
+          clearStatusTimers();
+          stopPump();
+          finishAuthoritative();
+          commitTermHits([]);
+          app.error = '输出中断。Enter 重试';
         },
       },
     );
@@ -362,7 +393,7 @@ function dispatchStatusTimers() {
 async function fallbackToPoint(question) {
   try {
     const res = await api.ask({ question, strategy: 'point' });
-    const body = String(res.answer || '');
+    const body = normalizeStream(res.answer || '');
     const ok = res.strategy !== 'gate' && !res.skipped && body.trim().length > 0;
     if (!ok) throw new Error('empty');
     app.strategy = 'point';

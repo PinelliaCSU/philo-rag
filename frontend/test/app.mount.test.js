@@ -70,6 +70,17 @@ describe('首屏', () => {
     expect(target.querySelector('.input-line textarea').value).toBe('');
   });
 
+  it('滚轮缩放星图：提示行里的比例会变（P2）', async () => {
+    await mountApp();
+    const hint = target.querySelector('.sky-hint');
+    expect(hint.textContent).toContain('100%');
+    target.querySelector('.starfield').dispatchEvent(
+      new WheelEvent('wheel', { deltaY: -240, clientX: 600, clientY: 400, bubbles: true, cancelable: true }),
+    );
+    flushSync();
+    expect(hint.textContent).not.toContain('100%');
+  });
+
   it('输入线为空时按 / 打开低语层，Esc 关闭', async () => {
     await mountApp();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '/' }));

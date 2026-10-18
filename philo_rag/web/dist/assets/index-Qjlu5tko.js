@@ -15009,14 +15009,23 @@ function subscribe(fn) {
   };
 }
 
-// 星图：自绘 Canvas 2D，三层画布（静态背景星 / 星座线 / 节点与脉冲）。
+// 星图：自绘 Canvas 2D，三层画布（背景恒星 / 星座线 / 节点与脉冲）。
 //
-// 三条硬规则（见设计文档 §11）：
-//   · 节点初始亮度 0，只有被回答命中的概念才亮；未点亮节点不显示标签、不响应点击；
-//   · 直接命中持久、一阶邻域临时，邻域不写库；
-//   · 空闲时停止 rAF：静止的星图不该有常驻绘制。
+// 概念节点仍旧遵守设计文档 §11 的硬规则：节点初始亮度 0，只有被回答命中的概念才亮；
+// 未点亮节点不显示标签、不响应点击；直接命中持久、一阶邻域临时；空闲时停止 rAF。
+//
+// 与设计文档的差异（P1 要求）：背景不再只有 520 个不可见的灰点，而是一张**可辨识的恒星图**——
+// 按幂律分布星等的程序化星表 + 银河带 + 亮星的四芒星芒。这些是装饰星，不参与点亮、
+// 不可点击、不写库；「点亮只由回答命中决定」这条契约没有被改动。
+//
+// 相机（P2）：scale（滚轮缩放）/ rotation（拖拽旋转）/ 平移（Shift+拖拽），
+// 概念节点与背景星共用同一个相机，所以缩放旋转时它们一起动。
 
 const TAU = Math.PI * 2;
+const MIN_SCALE = 0.6;
+const MAX_SCALE = 3.2;
+const ROTATE_PER_PX = 0.0035;   // 拖拽 1px 转多少弧度
+const ENERGY_DECAY = 0.92;      // 流式脉冲每帧衰减系数
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -15027,6 +15036,15 @@ function mulberry32(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// 星色：少数偏暖、少数偏冷，多数接近白
+function starColor(hue) {
+  if (hue < 0.16) return [255, 224, 190];
+  if (hue > 0.86) return [198, 218, 255];
+  return [238, 235, 228];
 }
 
 class StarMap {
@@ -15056,10 +15074,28 @@ class StarMap {
     this.unsubscribe = null;
     this.hotspots = [];
     this.reduced = prefersReducedMotion();
-    this.dirtyBackground = true;   // 静态层离屏缓存：只有换数据/换尺寸时才重画
+    this.dirtyBackground = true;   // 静态层缓存：只有换数据/换尺寸/动相机时才重画
 
+    // 观测相机：缩放、旋转、平移（世界坐标原点在屏幕中心）
+    this.camera = { scale: 1, rotation: 0, tx: 0, ty: 0 };
+    this.stars = [];
+    this.starSeed = 0;
+
+    // 流式脉冲能量：0..1，随每个提交的字符批次抬升、逐帧衰减（P3）
+    this.energy = 0;
+    this.lastFlashAt = 0;
+    this.interacting = false;      // 拖拽/缩放中降级绘制，保证操作流畅
   }
 
+  /** 交互开始/结束：结束时补画一次完整细节。 */
+  setInteracting(active) {
+    if (this.interacting === active) return;
+    this.interacting = active;
+    this.dirtyBackground = true;
+    this.draw();
+  }
+
+  // ------------------------------------------------------------------ 数据 //
   setData(payload) {
     this.payload = payload;
     this.nodes = (payload.nodes || []).map((n) => ({ ...n }));
@@ -15105,27 +15141,357 @@ class StarMap {
     this.draw();
   }
 
-  /** 命中连线：从星点指向正文里的那个词，600ms 后淡掉；节点本身保持低亮。 */
-  connectToDom(names) {
-    if (!this.nodes.length || typeof document === 'undefined') return;
-    const rect = this.nodeCanvas.getBoundingClientRect();
-    const now = performance.now();
-    for (const name of names || []) {
-      const node = this.byName.get(name);
-      if (!node) continue;
-      const el = document.querySelector(
-        '.term-hit[data-term="' + String(name).replace(/"/g, '\\"') + '"]',
-      );
-      if (!el) continue;
-      const box = el.getBoundingClientRect();
-      if (!box.width && !box.height) continue;
-      this.linksTo.push({
-        from: this.point(node),
-        to: { x: box.left - rect.left, y: box.top - rect.top + box.height / 2 },
-        born: now,
-      });
+  // ------------------------------------------------------------------ 相机 //
+  /** 世界坐标（相对屏幕中心，px）→ 屏幕坐标。 */
+  applyCamera(x, y) {
+    const { scale, rotation, tx, ty } = this.camera;
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    return {
+      x: this.width / 2 + (x * c - y * s) * scale + tx,
+      y: this.height / 2 + (x * s + y * c) * scale + ty,
+    };
+  }
+
+  /** 屏幕坐标 → 世界坐标。缩放要钉住光标下的那一点时用它。 */
+  toWorld(sx, sy) {
+    const { scale, rotation, tx, ty } = this.camera;
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    const dx = sx - this.width / 2 - tx;
+    const dy = sy - this.height / 2 - ty;
+    return { x: (dx * c + dy * s) / scale, y: (-dx * s + dy * c) / scale };
+  }
+
+  cameraChanged() {
+    this.dirtyBackground = true;
+    this.draw();
+    this.syncHotspots();   // 热区跟着节点走
+  }
+
+  /** 滚轮缩放：钉住光标下的世界点，zoomAt(-100) 放大。 */
+  zoomAt(sx, sy, deltaY) {
+    const factor = Math.exp(-deltaY * 0.0016);
+    const next = clamp(this.camera.scale * factor, MIN_SCALE, MAX_SCALE);
+    if (next === this.camera.scale) return;
+    const world = this.toWorld(sx, sy);
+    this.camera.scale = next;
+    const rotated = this.rotateWorld(world.x, world.y);
+    this.camera.tx = sx - this.width / 2 - rotated.x;
+    this.camera.ty = sy - this.height / 2 - rotated.y;
+    this.cameraChanged();
+  }
+
+  rotateWorld(x, y) {
+    const { scale, rotation } = this.camera;
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    return { x: (x * c - y * s) * scale, y: (x * s + y * c) * scale };
+  }
+
+  /** 拖拽旋转（dx 像素）。 */
+  rotateBy(dx) {
+    this.camera.rotation += dx * ROTATE_PER_PX;
+    this.cameraChanged();
+  }
+
+  /** Shift+拖拽平移（观星时的顺手操作）。 */
+  panBy(dx, dy) {
+    this.camera.tx += dx;
+    this.camera.ty += dy;
+    this.cameraChanged();
+  }
+
+  /** 双击 / Esc 回到初始视角。 */
+  resetCamera() {
+    this.camera = { scale: 1, rotation: 0, tx: 0, ty: 0 };
+    this.cameraChanged();
+  }
+
+  get zoomLabel() {
+    return Math.round(this.camera.scale * 100) + '%';
+  }
+
+  // ------------------------------------------------------------------ 画布 //
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = this.bg.getBoundingClientRect();
+    this.width = Math.max(1, rect.width);
+    this.height = Math.max(1, rect.height);
+    for (const canvas of [this.bg, this.links, this.nodeCanvas]) {
+      canvas.width = Math.floor(this.width * dpr);
+      canvas.height = Math.floor(this.height * dpr);
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      const ctx = canvas.getContext('2d');
+      if (ctx && ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    if (this.linksTo.length) this.startLoop();
+    this.dirtyBackground = true;
+    this.buildStars();
+    this.draw();
+    this.syncHotspots();
+  }
+
+  /** 程序化星表：固定 seed，刷新不变。星点数量随视口面积走。 */
+  buildStars() {
+    const area = this.width * this.height;
+    // (待补充：可见星点数量/密度策略) 当前按面积密度取 480–1200 颗
+    const count = clamp(Math.round(area / 1500), 480, 1200);
+    const rng = mulberry32(20261018);
+    const stars = [];
+    for (let i = 0; i < count; i += 1) {
+      // 归一化天空坐标：[-1,1] 覆盖视口（缩放/旋转在绘制时按相机施加）
+      const nx = rng() * 2 - 1;
+      const ny = rng() * 2 - 1;
+      // 星等按幂律：暗星多、亮星少，这样才像真实星野而不是均匀噪点
+      const mag = Math.pow(rng(), 2.4);
+      stars.push({ nx, ny, mag, hue: rng() });
+    }
+    this.stars = stars;
+    this.starSeed = Math.round(area);
+  }
+
+  /** 概念节点的世界坐标（px，相对屏幕中心）。 */
+  point(node) {
+    const pad = 0.94;
+    return this.applyCamera(node.x * (this.width / 2) * pad, node.y * (this.height / 2) * pad);
+  }
+
+  starPoint(star) {
+    return this.applyCamera(star.nx * (this.width / 2), star.ny * (this.height / 2));
+  }
+
+  radius(node) {
+    const axis = (this.payload?.axes || []).includes(node.id);
+    const base = Math.sqrt(Math.max(node.hits || 1, 1));
+    return Math.max(1.5, Math.min(5, 1.2 + base * 0.22)) + (axis ? 0.8 : 0);
+  }
+
+  /** 背景层：银河带 + 恒星 + 概念图的隐约结构线（固定 seed）。 */
+  drawBackground() {
+    const ctx = this.bg.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    // 银河：一条随相机一起转的稀薄星尘带
+    const bandAngle = this.camera.rotation - 0.52;
+    ctx.save();
+    ctx.translate(this.width / 2 + this.camera.tx, this.height / 2 + this.camera.ty);
+    ctx.rotate(bandAngle);
+    const bandLen = Math.hypot(this.width, this.height) * 1.1 * this.camera.scale;
+    const bandW = this.height * 0.34 * this.camera.scale;
+    const grad = ctx.createLinearGradient(0, -bandW, 0, bandW);
+    grad.addColorStop(0, 'rgba(150, 168, 205, 0)');
+    grad.addColorStop(0.5, 'rgba(168, 182, 214, 0.085)');
+    grad.addColorStop(1, 'rgba(150, 168, 205, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-bandLen / 2, -bandW, bandLen, bandW * 2);
+    ctx.restore();
+
+    // 恒星：按星等给半径、亮度、星芒。
+    // 拖拽/缩放时交错取样并跳过光晕，静止后补画完整细节（交互流畅优先）。
+    const lod = this.interacting;
+    const stepRatio = lod ? 2 : 1;
+    for (let i = 0; i < this.stars.length; i += stepRatio) {
+      const star = this.stars[i];
+      const p = this.starPoint(star);
+      if (p.x < -8 || p.y < -8 || p.x > this.width + 8 || p.y > this.height + 8) continue;
+      const mag = star.mag;
+      const [r, g, b] = starColor(star.hue);
+      const alpha = (0.2 + mag * 0.78) * this.dim;
+      const radius = 0.45 + mag * 1.45;
+
+      if (mag > 0.72 && !lod) {
+        // 亮星：先铺一层光晕
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 6);
+        glow.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',' + (0.34 * alpha).toFixed(3) + ')');
+        glow.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius * 6, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
+      ctx.arc(p.x, p.y, radius, 0, TAU);
+      ctx.fill();
+
+      if (mag > 0.88 && !lod) {
+        // 最亮的几颗加四芒星芒：一眼就能认出这是星图
+        const spike = radius * (4.5 + mag * 3);
+        ctx.strokeStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (0.3 * alpha).toFixed(3) + ')';
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(p.x - spike, p.y);
+        ctx.lineTo(p.x + spike, p.y);
+        ctx.moveTo(p.x, p.y - spike);
+        ctx.lineTo(p.x, p.y + spike);
+        ctx.stroke();
+      }
+    }
+
+    // 概念图的结构线：很低但可见，像星表连线
+    if (this.nodes.length) {
+      ctx.strokeStyle = 'rgba(186, 196, 214, ' + (0.05 * this.dim).toFixed(3) + ')';
+      ctx.lineWidth = 0.6;
+      for (const edge of this.edges) {
+        const a = this.byName.get(edge.source);
+        const b = this.byName.get(edge.target);
+        if (!a || !b) continue;
+        const p1 = this.point(a);
+        const p2 = this.point(b);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  drawLinks() {
+    const ctx = this.links.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, this.width, this.height);
+    const lit = [...this.lit].filter((n) => this.byName.has(n));
+    if (lit.length < 2) return;
+    // 范围查询的星座轨迹：沿剪枝边把已点亮节点连起来
+    ctx.strokeStyle = 'rgba(214, 208, 194, ' + (0.16 * this.dim).toFixed(3) + ')';
+    ctx.lineWidth = 0.8;
+    const litSet = new Set(lit);
+    for (const edge of this.edges) {
+      if (!litSet.has(edge.source) || !litSet.has(edge.target)) continue;
+      const p1 = this.point(this.byName.get(edge.source));
+      const p2 = this.point(this.byName.get(edge.target));
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+  }
+
+  drawNodes(now = performance.now()) {
+    const ctx = this.nodeCanvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, this.width, this.height);
+    const reduced = this.reduced;
+
+    // P3：流式脉冲——中心一团极淡的辉光 + 几颗随机被「点亮」的星，随输出节奏呼吸
+    if (this.energy > 0.01) {
+      const e = this.energy;
+      // 阅读时（dim 低）脉冲弱一档，避免盖住正文
+      const strength = e * (0.6 + 0.4 * this.dim);
+      // ① 整屏极淡提亮：报告「背景在呼吸」最直接的信号
+      ctx.fillStyle = 'rgba(198, 210, 235, ' + (0.035 * strength).toFixed(3) + ')';
+      ctx.fillRect(0, 0, this.width, this.height);
+
+      // ② 中心辉光：随输出节奏轻微起伏
+      const wobble = 0.85 + 0.15 * Math.sin(now * 0.012);
+      const glow = ctx.createRadialGradient(
+        this.width / 2, this.height / 2, 0,
+        this.width / 2, this.height / 2, Math.hypot(this.width, this.height) * 0.62,
+      );
+      glow.addColorStop(0, 'rgba(226, 232, 245, ' + (0.17 * strength * wobble).toFixed(3) + ')');
+      glow.addColorStop(0.45, 'rgba(210, 220, 240, ' + (0.075 * strength * wobble).toFixed(3) + ')');
+      glow.addColorStop(1, 'rgba(200, 210, 235, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, this.width, this.height);
+
+      // ③ 闪烁星：每帧换一批被点亮的星，读起来像「星野在回应输出」
+      if (this.stars.length) {
+        const flickers = Math.round(10 + strength * 34);
+        for (let i = 0; i < flickers; i += 1) {
+          const star = this.stars[(now * 0.06 + i * 137) % this.stars.length | 0];
+          if (!star || star.mag < 0.45) continue;
+          const p = this.starPoint(star);
+          const radius = 0.7 + star.mag * 3.2 * strength;
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(238, 244, 255, ' + (0.85 * strength).toFixed(3) + ')';
+          ctx.arc(p.x, p.y, radius, 0, TAU);
+          ctx.fill();
+        }
+      }
+    }
+
+    // 命中连线画在节点下面：极细、随 age 淡出
+    for (const link of this.linksTo) {
+      const age = (now - link.born) / 600;
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(233, 229, 219, ' + (0.12 * (1 - age) * this.dim).toFixed(3) + ')';
+      ctx.lineWidth = 0.6;
+      ctx.moveTo(link.from.x, link.from.y);
+      ctx.lineTo(link.to.x, link.to.y);
+      ctx.stroke();
+    }
+
+    for (const node of this.nodes) {
+      const p = this.point(node);
+      const r = this.radius(node);
+      const isLit = this.lit.has(node.id);
+      const isHalo = !isLit && this.halo.has(node.id);
+      const isHover = this.hovered === node.id || this.focused === node.id;
+
+      let alpha = 0;
+      if (isLit) alpha = 0.78;
+      else if (isHalo) alpha = 0.32;
+      else if (isHover) alpha = 0.6;
+      if (!alpha) continue;
+      alpha *= this.dim;
+
+      const pulse = this.pulses.get(node.id);
+      if (pulse && !reduced) {
+        const t = Math.min(1, (now - pulse) / 620);
+        const grow = 1 + t * 2.4;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(232, 228, 216, ' + (0.3 * (1 - t) * this.dim).toFixed(3) + ')';
+        ctx.lineWidth = 0.9;
+        ctx.arc(p.x, p.y, r * grow, 0, TAU);
+        ctx.stroke();
+      }
+
+      // 点亮节点给一圈光晕：在星野里更容易认出来
+      if (isLit) {
+        const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 7);
+        halo.addColorStop(0, 'rgba(236, 240, 250, ' + (0.3 * this.dim).toFixed(3) + ')');
+        halo.addColorStop(1, 'rgba(236, 240, 250, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r * 7, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(240, 237, 228, ' + alpha.toFixed(3) + ')';
+      ctx.arc(p.x, p.y, r, 0, TAU);
+      ctx.fill();
+
+      if (this.favorite.has(node.id)) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(240, 237, 228, ' + (0.28 * this.dim).toFixed(3) + ')';
+        ctx.lineWidth = 0.7;
+        ctx.arc(p.x, p.y, r + 3.5, 0, TAU);
+        ctx.stroke();
+      }
+    }
+  }
+
+  draw() {
+    if (!this.width) return;
+    if (this.dirtyBackground) {
+      this.drawBackground();
+      this.dirtyBackground = false;
+    }
+    this.drawLinks();
+    this.drawNodes();
+  }
+
+  // ------------------------------------------------------------------ 脉冲 //
+  /** P3：流式输出的每个提交批次抬一次能量，由 step() 逐帧衰减。 */
+  flash(amount = 6) {
+    const now = performance.now();
+    this.energy = clamp(this.energy + 0.05 + Math.min(amount, 8) * 0.012, 0, 1);
+    this.lastFlashAt = now;
+    this.startLoop();
   }
 
   /** 一次回答的直接命中：限制条数、200ms 节流、排队逐个脉冲。 */
@@ -15163,6 +15529,15 @@ class StarMap {
     const now = performance.now();
     let busy = false;
 
+    // 流式能量衰减：静止后自然回到 0，循环随之停下
+    if (this.energy > 0.01) {
+      this.energy *= ENERGY_DECAY;
+      busy = true;
+    } else if (this.energy) {
+      this.energy = 0;
+      this.drawNodes(now);
+    }
+
     if (this.queue.length && now - this.lastPulseAt > 200) {
       const name = this.queue.shift();
       this.lastPulseAt = now;
@@ -15183,166 +15558,47 @@ class StarMap {
     if (!busy && !this.queue.length) this.stopLoop();
   }
 
-  resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const rect = this.bg.getBoundingClientRect();
-    this.width = Math.max(1, rect.width);
-    this.height = Math.max(1, rect.height);
-    for (const canvas of [this.bg, this.links, this.nodeCanvas]) {
-      canvas.width = Math.floor(this.width * dpr);
-      canvas.height = Math.floor(this.height * dpr);
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  /** 命中连线：从星点指向正文里的那个词，600ms 后淡掉；节点本身保持低亮。 */
+  connectToDom(names) {
+    if (!this.nodes.length || typeof document === 'undefined') return;
+    const rect = this.nodeCanvas.getBoundingClientRect();
+    const now = performance.now();
+    for (const name of names || []) {
+      const node = this.byName.get(name);
+      if (!node) continue;
+      const el = document.querySelector(
+        '.term-hit[data-term="' + String(name).replace(/"/g, '\\\\"') + '"]',
+      );
+      if (!el) continue;
+      const box = el.getBoundingClientRect();
+      if (!box.width && !box.height) continue;
+      this.linksTo.push({
+        from: this.point(node),
+        to: { x: box.left - rect.left, y: box.top - rect.top + box.height / 2 },
+        born: now,
+      });
     }
-    this.dirtyBackground = true;
-    this.draw();
-    this.syncHotspots();
-  }
-
-  point(node) {
-    const pad = 0.06;
-    const x = this.width / 2 + node.x * (this.width / 2) * (1 - pad);
-    const y = this.height / 2 + node.y * (this.height / 2) * (1 - pad);
-    return { x, y };
-  }
-
-  radius(node) {
-    const axis = (this.payload?.axes || []).includes(node.id);
-    const base = Math.sqrt(Math.max(node.hits || 1, 1));
-    return Math.max(1.5, Math.min(5, 1.2 + base * 0.22)) + (axis ? 0.8 : 0);
-  }
-
-  /** 静态层：背景星 + 轴元素的隐约结构线（固定 seed，刷新不变）。 */
-  drawBackground() {
-    const ctx = this.bg.getContext('2d');
-    ctx.clearRect(0, 0, this.width, this.height);
-    const rng = mulberry32(20261018);
-    const count = Math.min(520, Math.round((this.width * this.height) / 2600));
-    for (let i = 0; i < count; i += 1) {
-      const x = rng() * this.width;
-      const y = rng() * this.height;
-      const r = 0.3 + rng() * 0.7;
-      const alpha = 0.04 + rng() * 0.1;
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(224, 220, 210, ' + alpha.toFixed(3) + ')';
-      ctx.arc(x, y, r, 0, TAU);
-      ctx.fill();
-    }
-
-    // 结构线：只在有布局时画，透明度极低；干扰可全隐（这里给到几乎看不见）
-    if (this.nodes.length) {
-      ctx.strokeStyle = 'rgba(200, 196, 186, 0.035)';
-      ctx.lineWidth = 0.6;
-      for (const edge of this.edges) {
-        const a = this.byName.get(edge.source);
-        const b = this.byName.get(edge.target);
-        if (!a || !b) continue;
-        const p1 = this.point(a);
-        const p2 = this.point(b);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-    }
-  }
-
-  drawLinks() {
-    const ctx = this.links.getContext('2d');
-    ctx.clearRect(0, 0, this.width, this.height);
-    const lit = [...this.lit].filter((n) => this.byName.has(n));
-    if (lit.length < 2) return;
-    // 范围查询的星座轨迹：沿剪枝边把已点亮节点连起来，极淡
-    ctx.strokeStyle = 'rgba(214, 208, 194, ' + (0.12 * this.dim).toFixed(3) + ')';
-    ctx.lineWidth = 0.7;
-    const litSet = new Set(lit);
-    for (const edge of this.edges) {
-      if (!litSet.has(edge.source) || !litSet.has(edge.target)) continue;
-      const p1 = this.point(this.byName.get(edge.source));
-      const p2 = this.point(this.byName.get(edge.target));
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-    }
-  }
-
-  drawNodes(now = performance.now()) {
-    const ctx = this.nodeCanvas.getContext('2d');
-    ctx.clearRect(0, 0, this.width, this.height);
-    const reduced = this.reduced;
-
-    // 命中连线画在节点下面：极细、随 age 淡出
-    for (const link of this.linksTo) {
-      const age = (now - link.born) / 600;
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(233, 229, 219, ' + (0.1 * (1 - age) * this.dim).toFixed(3) + ')';
-      ctx.lineWidth = 0.6;
-      ctx.moveTo(link.from.x, link.from.y);
-      ctx.lineTo(link.to.x, link.to.y);
-      ctx.stroke();
-    }
-
-    for (const node of this.nodes) {
-      const p = this.point(node);
-      const r = this.radius(node);
-      const isLit = this.lit.has(node.id);
-      const isHalo = !isLit && this.halo.has(node.id);
-      const isHover = this.hovered === node.id || this.focused === node.id;
-
-      let alpha = 0;
-      if (isLit) alpha = 0.62;
-      else if (isHalo) alpha = 0.24;
-      else if (isHover) alpha = 0.5;
-      if (!alpha) continue;
-      alpha *= this.dim;
-
-      const pulse = this.pulses.get(node.id);
-      if (pulse && !reduced) {
-        const t = Math.min(1, (now - pulse) / 620);
-        const grow = 1 + t * 2.4;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(232, 228, 216, ' + (0.22 * (1 - t) * this.dim).toFixed(3) + ')';
-        ctx.lineWidth = 0.8;
-        ctx.arc(p.x, p.y, r * grow, 0, TAU);
-        ctx.stroke();
-      }
-
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(236, 232, 222, ' + alpha.toFixed(3) + ')';
-      ctx.arc(p.x, p.y, r, 0, TAU);
-      ctx.fill();
-
-      if (this.favorite.has(node.id)) {
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(236, 232, 222, ' + (0.18 * this.dim).toFixed(3) + ')';
-        ctx.lineWidth = 0.7;
-        ctx.arc(p.x, p.y, r + 3.5, 0, TAU);
-        ctx.stroke();
-      }
-    }
-  }
-
-  draw() {
-    if (!this.width) return;
-    if (this.dirtyBackground) {
-      this.drawBackground();
-      this.dirtyBackground = false;
-    }
-    this.drawLinks();
-    this.drawNodes();
+    if (this.linksTo.length) this.startLoop();
   }
 
   /** 点击热区：只给「已点亮 / 邻域 / 收藏」的节点，未点亮节点不暴露。 */
   syncHotspots() {
     if (!this.hitLayer) return;
-    this.hotspots = [];
-    this.hitLayer.textContent = '';
     const actionable = this.nodes.filter(
       (n) => this.lit.has(n.id) || this.halo.has(n.id) || this.favorite.has(n.id),
     );
+    // 相机变化时热区集合通常不变：只挪位置，避免每次 pointermove 重建 DOM
+    if (actionable.length === this.hotspots.length
+        && actionable.every((n, i) => this.hotspots[i].name === n.id)) {
+      for (let i = 0; i < actionable.length; i += 1) {
+        const p = this.point(actionable[i]);
+        this.hotspots[i].el.style.left = p.x + 'px';
+        this.hotspots[i].el.style.top = p.y + 'px';
+      }
+      return;
+    }
+    this.hotspots = [];
+    this.hitLayer.textContent = '';
     for (const node of actionable) {
       const p = this.point(node);
       const el = document.createElement('button');
@@ -15352,6 +15608,7 @@ class StarMap {
       el.setAttribute('aria-label', node.id);
       el.style.left = p.x + 'px';
       el.style.top = p.y + 'px';
+      el.addEventListener('pointerdown', (e) => e.stopPropagation());   // 点在热区上不触发拖拽
       el.addEventListener('click', () => this.onSelect(node.id));
       el.addEventListener('mouseenter', () => this.setHovered(node.id));
       el.addEventListener('mouseleave', () => this.setHovered(null));
@@ -15378,8 +15635,20 @@ class StarMap {
 
 // 轻量 Markdown：只做排版需要的子集（标题 / 段落 / 列表 / 强调 / 行内代码）。
 // 不渲染表格与原始 HTML——答案正文里的尖括号一律转义，避免注入。
+//
+// 换行必须归一：后端（Python）给出的回答是 CRLF（`\r\n`）。如果这里按 `/\n{2,}/` 切块，
+// CRLF 的「空行」是 `\n\r\n`，永远匹配不上 → 整篇被当成一个块，
+// 再被标题分支吃掉后半段（详见 README 的流式说明）。所以入口先归一成 LF。
 
-const BLOCK_SPLIT = /\n{2,}/;
+const CRLF$1 = /\r\n?/g;
+
+/** 统一换行：CRLF / CR → LF。正文、块、行内三条入口都过它。 */
+function normalizeNewlines(text) {
+  return String(text == null ? '' : text).replace(CRLF$1, '\n');
+}
+
+// 空行 = 两行之间只有空白：容错行尾空格与 `\r`
+const BLOCK_SPLIT = /\n[ \t]*\n/;
 
 function escapeHtml(text) {
   return String(text)
@@ -15391,7 +15660,7 @@ function escapeHtml(text) {
 
 /** 行内语法：`code` / **强调** / *斜体*。先转义再替换，标签由本函数自己产出。 */
 function renderInline(text) {
-  let out = escapeHtml(text);
+  let out = escapeHtml(normalizeNewlines(text));
   out = out.replace(/`([^`]+)`/g, (_, code) => '<code>' + code + '</code>');
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>' + '$1' + '</strong>');
   out = out.replace(/\*([^*\n]+)\*/g, '<em>' + '$1' + '</em>');
@@ -15401,7 +15670,7 @@ function renderInline(text) {
 
 /** 把正文切成块；流式渲染只重绘最后一块，前面的块定型后不再碰。 */
 function splitBlocks(text) {
-  return String(text || '')
+  return normalizeNewlines(text)
     .split(BLOCK_SPLIT)
     .map((raw) => raw.replace(/\s+$/, ''))
     .filter((raw) => raw.length > 0);
@@ -15409,11 +15678,16 @@ function splitBlocks(text) {
 
 /** 单个块 → HTML。（标题 / 无序列表 / 有序列表 / 段落） */
 function renderBlock(block) {
-  const lines = block.split('\n');
+  const src = normalizeNewlines(block);
+  const lines = src.split('\n');
   const head = lines[0].match(/^(#{1,4})\s+(.*)$/);
-  if (head && lines.length >= 1) {
+  if (head) {
     const level = head[1].length + 1; // # → h2：纸页顶部已有问题行，标题不抢 h1
-    return '<h' + level + '>' + renderInline(head[2]) + '</h' + level + '>';
+    const title = '<h' + level + '>' + renderInline(head[2]) + '</h' + level + '>';
+    // 标题后面紧跟的内容必须一起渲染：模板后端常给出「### 标题\n- 项目」这种紧凑块，
+    // 只返回标题会把整段正文静默丢掉（P4 的直接成因之一）。
+    const body = lines.slice(1).join('\n').replace(/^\s*\n+/, '');
+    return body.trim() ? title + renderBlock(body) : title;
   }
   if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
     const items = lines.map((l) => '<li>' + renderInline(l.replace(/^\s*[-*]\s+/, '')) + '</li>');
@@ -15639,8 +15913,14 @@ async function boot() {
 // --------------------------------------------------------------------------- //
 // 提问：SSE → 缓冲 → rAF 提交 → 定型
 // --------------------------------------------------------------------------- //
-let incoming = '';
+// 后端（Python）给的是 CRLF。块级切分、段落切分、Markdown 都要按 LF 判断，
+// 所以在入口统一归一：归一之后 "\n\n" / /\n[ \t]*\n/ 才是真的空行。
+const CRLF = /\r\n?/g;
 
+const normalizeStream = (text) => String(text == null ? '' : text).replace(CRLF, '\n');
+const BLANK_LINE = /\n[ \t]*\n/;
+let incoming = '';
+let settled = false;
 let consumed = 0;
 let pumpStop = null;
 let settleTimer = 0;
@@ -15696,9 +15976,13 @@ function pump() {
 		app.runLen = chunk.length;
 		app.tail += chunk;
 
+		// 每个提交批次给背景一次脉冲：星图的闪烁因此与输出节奏同频
+		if (starBridge.flash) starBridge.flash(chunk.length);
+
 		// 块边界：把已完成的块提交为 html，只留最后一块继续长
-		if (app.tail.includes('\n\n')) {
-			const parts = app.tail.split(/\n{2,}/);
+		// （用 /\n[ \t]*\n/ 而不是 '\n\n'：空行里可能带缩进）
+		if (BLANK_LINE.test(app.tail)) {
+			const parts = app.tail.split(BLANK_LINE);
 			const rest = parts.pop() || '';
 
 			for (const block of parts) {
@@ -15711,8 +15995,17 @@ function pump() {
 	});
 }
 
+/** 定型时取最长的一份文本：answerRaw / 完整缓冲 / 已提交尾巴，谁最长用谁。 */
+function longestText(...candidates) {
+	let best = '';
+
+	for (const c of candidates) if (typeof c === 'string' && c.length > best.length) best = c;
+
+	return best;
+}
+
 function finishAuthoritative() {
-	const text = app.answerRaw || app.tail;
+	const text = longestText(app.answerRaw, incoming, app.tail);
 
 	app.blocks = splitBlocks(text);
 	app.tail = '';
@@ -15731,8 +16024,8 @@ function applyMeta(meta) {
 	app.skipped = !!meta.skipped || meta.strategy === 'gate';
 
 	if (meta.strategy === 'gate' && meta.answer) {
-		app.answerRaw = meta.answer;
-		app.blocks = splitBlocks(meta.answer);
+		app.answerRaw = normalizeStream(meta.answer);
+		app.blocks = splitBlocks(app.answerRaw);
 		app.tail = '';
 		app.done = true;
 		app.streaming = false;
@@ -15775,6 +16068,7 @@ function attachStar(handle) {
 	starBridge.setLit = handle.setLit;
 	starBridge.connect = handle.connect;
 	starBridge.setFavorites = handle.setFavorites;
+	starBridge.flash = handle.flash;
 
 	if (app.lit.length) handle.setLit(app.lit);
 }
@@ -15817,6 +16111,7 @@ async function ask(question, { strategy = 'auto', followup = false } = {}) {
 		app.prevQuestion = '';
 	}
 
+	settled = false;
 	resetPaper();
 	app.paperKind = 'answer';
 	app.question = text;
@@ -15845,11 +16140,13 @@ async function ask(question, { strategy = 'auto', followup = false } = {}) {
 			},
 
 			onDelta: (delta) => {
-				incoming += delta;
+				incoming += normalizeStream(delta);
 			},
 
 			onDone: (event) => {
-				const final = String(event.answer || '');
+				settled = true;
+
+				const final = normalizeStream(event.answer || '');
 
 				if (final) app.answerRaw = final;
 
@@ -15881,11 +16178,24 @@ async function ask(question, { strategy = 'auto', followup = false } = {}) {
 			},
 
 			onError: (detail) => {
+				settled = true;
 				clearStatusTimers();
 				stopPump();
 				app.streaming = false;
 				app.status = '';
 				app.error = detail || '这次没有接通。Enter 重试';
+			},
+
+			onClose: () => {
+				// 流结束了却没有 done/error：连接被中断。保留已收到的文字，并明确告知（§8.4）
+				if (settled) return;
+
+				settled = true;
+				clearStatusTimers();
+				stopPump();
+				finishAuthoritative();
+				commitTermHits([]);
+				app.error = '输出中断。Enter 重试';
 			}
 		});
 	} catch(err) {
@@ -15918,7 +16228,7 @@ function dispatchStatusTimers() {
 async function fallbackToPoint(question) {
 	try {
 		const res = await api.ask({ question, strategy: 'point' });
-		const body = String(res.answer || '');
+		const body = normalizeStream(res.answer || '');
 		const ok = res.strategy !== 'gate' && !res.skipped && body.trim().length > 0;
 
 		if (!ok) throw new Error('empty');
@@ -16484,7 +16794,7 @@ var root$c = from_html(`<span class="def"> </span>`);
 var root_1$a = from_html(`<div class="star-label" aria-hidden="true"><span class="name"> </span> <!></div>`);
 var root_2$9 = from_html(`<p class="star-error"> </p>`);
 var root_3$9 = from_html(`<li><button type="button" class="linkish"> </button></li>`);
-var root_4$9 = from_html(`<div class="starfield" tabindex="0" role="application" aria-label="星图：只显示被回答点亮的概念。方向键在已点亮节点间移动，Enter 打开。"><canvas class="layer"></canvas> <canvas class="layer"></canvas> <canvas class="layer"></canvas> <div class="hotspots"></div> <!> <!> <ul class="lit-list" aria-live="polite"></ul></div>`);
+var root_4$9 = from_html(`<div tabindex="0" role="application" aria-label="星图：只显示被回答点亮的概念。滚轮缩放、拖拽旋转、Shift+拖拽平移、双击复位；方向键在已点亮节点间移动，Enter 打开。"><canvas class="layer"></canvas> <canvas class="layer"></canvas> <canvas class="layer"></canvas> <div class="hotspots"></div> <!> <!> <p class="sky-hint" aria-hidden="true"> </p> <ul class="lit-list" aria-live="polite"></ul></div>`);
 
 function StarField($$anchor, $$props) {
 	push($$props, true);
@@ -16496,8 +16806,10 @@ function StarField($$anchor, $$props) {
 	let container = state(null);
 	let label = state('');
 	let labelDef = state('');
+	let zoomLabel = state('100%');
+	let dragging = state(false);
 	let map = null;
-	let ready = false;
+	let drag = null;
 
 	onMount(async () => {
 		map = new StarMap({
@@ -16529,13 +16841,13 @@ function StarField($$anchor, $$props) {
 
 			map.setData(payload);
 			provideGraph(() => payload);
-			ready = true;
 
 			attachStar({
 				enqueue: (direct, halo) => map.enqueue(direct, halo),
 				setLit: (names) => map.setLit(names),
 				connect: (names) => map.connectToDom(names),
-				setFavorites: (names) => map.setFavorites(names)
+				setFavorites: (names) => map.setFavorites(names),
+				flash: (amount) => map.flash(amount) // P3：流式输出 → 背景脉冲
 			});
 
 			const lit = await allLitNodes();
@@ -16546,6 +16858,7 @@ function StarField($$anchor, $$props) {
 
 			map.setFavorites(favs.map((f) => f.refId));
 			app.lit = lit.map((n) => n.name);
+			set(zoomLabel, map.zoomLabel, true);
 		} catch {
 			app.starError = '知识图谱未能载入';
 		}
@@ -16563,6 +16876,76 @@ function StarField($$anchor, $$props) {
 	user_effect(() => {
 		if (map) map.setDim(app.starDim);
 	});
+
+	// ------------------------------------------------------------------ 相机 //
+	let wheelTimer = 0;
+
+	function onWheel(event) {
+		if (!map) return;
+
+		event.preventDefault(); // 别让整页滚走
+
+		const rect = get(container).getBoundingClientRect();
+
+		map.setInteracting(true); // 连续滚轮期间降级绘制
+		map.zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY);
+		set(zoomLabel, map.zoomLabel, true);
+		clearTimeout(wheelTimer);
+		wheelTimer = setTimeout(() => map && map.setInteracting(false), 160);
+	}
+
+	function onPointerDown(event) {
+		if (!map || event.button !== 0) return;
+		if (event.target.closest('.star-hotspot, .lit-list, button')) return;
+
+		drag = {
+			x: event.clientX,
+			y: event.clientY,
+			moved: 0,
+			pan: event.shiftKey
+		};
+
+		set(dragging, true);
+		map.setInteracting(true);
+		get(container).setPointerCapture && get(container).setPointerCapture(event.pointerId);
+	}
+
+	function onPointerMove(event) {
+		if (!map || !drag) return;
+
+		const dx = event.clientX - drag.x;
+		const dy = event.clientY - drag.y;
+
+		drag.x = event.clientX;
+		drag.y = event.clientY;
+		drag.moved += Math.abs(dx) + Math.abs(dy);
+
+		if (drag.pan) map.panBy(dx, dy); else map.rotateBy(dx); // 左右拖 = 绕天球转
+
+		set(zoomLabel, map.zoomLabel, true);
+	}
+
+	function onPointerUp(event) {
+		if (!drag) return;
+
+		const clicked = drag.moved < 3;
+
+		drag = null;
+		set(dragging, false);
+		map.setInteracting(false); // 松手补画完整细节
+
+		if (clicked) {
+			// 空白处点一下 = 把焦点交回输入线（与既有交互契约一致）
+			if (!event.shiftKey) focusInput();
+		}
+	}
+
+	function onDblClick() {
+		if (!map) return;
+
+		map.resetCamera();
+		set(zoomLabel, map.zoomLabel, true);
+	}
 
 	function onKeydown(event) {
 		if (!map) return;
@@ -16586,6 +16969,18 @@ function StarField($$anchor, $$props) {
 				event.preventDefault();
 				openConcept(name);
 			}
+		} else if (event.key === '+' || event.key === '=') {
+			event.preventDefault();
+			map.zoomAt(map.width / 2, map.height / 2, -120);
+			set(zoomLabel, map.zoomLabel, true);
+		} else if (event.key === '-' || event.key === '_') {
+			event.preventDefault();
+			map.zoomAt(map.width / 2, map.height / 2, 120);
+			set(zoomLabel, map.zoomLabel, true);
+		} else if (event.key === '0') {
+			event.preventDefault();
+			map.resetCamera();
+			set(zoomLabel, map.zoomLabel, true);
 		} else if (event.key === 'Escape') {
 			map.setFocused(null);
 			get(container).blur();
@@ -16593,6 +16988,7 @@ function StarField($$anchor, $$props) {
 	}
 
 	var div = root_4$9();
+	let classes;
 	var canvas_1 = child(div);
 
 	bind_this(canvas_1, ($$value) => set(background, $$value), () => get(background));
@@ -16656,23 +17052,44 @@ function StarField($$anchor, $$props) {
 		});
 	}
 
-	var ul = sibling(node_3, 2);
+	var p_1 = sibling(node_3, 2);
+	var text_3 = only_child(p_1);
+	var ul = sibling(p_1, 2);
 
 	each(ul, 20, () => app.lit, (name) => name, ($$anchor, name) => {
 		var li = root_3$9();
 		var button = child(li);
-		var text_3 = only_child(button, true);
-		template_effect(() => set_text(text_3, name));
+		var text_4 = only_child(button, true);
+		template_effect(() => set_text(text_4, name));
 		delegated('click', button, () => openConcept(name));
 		append($$anchor, li);
 	});
 	bind_this(div, ($$value) => set(container, $$value), () => get(container));
+
+	template_effect(() => {
+		classes = set_class(div, 1, 'starfield', null, classes, { dragging: get(dragging) });
+		set_text(text_3, `滚轮缩放 · 拖拽旋转 · Shift+拖拽平移 · 双击复位　${get(zoomLabel) ?? ''}`);
+	});
+
 	delegated('keydown', div, onKeydown);
+	event('wheel', div, onWheel);
+	delegated('pointerdown', div, onPointerDown);
+	delegated('pointermove', div, onPointerMove);
+	delegated('pointerup', div, onPointerUp);
+	event('pointercancel', div, onPointerUp);
+	delegated('dblclick', div, onDblClick);
 	append($$anchor, div);
 	pop();
 }
 
-delegate(['keydown', 'click']);
+delegate([
+	'keydown',
+	'pointerdown',
+	'pointermove',
+	'pointerup',
+	'dblclick',
+	'click'
+]);
 
 var root$b = from_html(`<div><textarea rows="1" spellcheck="false" autocomplete="off" aria-label="问一个点，或描述一片范围"></textarea> <span class="baseline" aria-hidden="true"></span></div>`);
 
