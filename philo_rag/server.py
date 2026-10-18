@@ -1,14 +1,12 @@
-"""Web 服务层：把检索入口暴露为 HTTP API，并托管内置单页界面。
+"""Web 服务层：把检索入口暴露为 HTTP API，并托管 Vite 构建出的单页界面。
 
-启动：
-    python -m philo_rag.cli serve --port 8000
-    # 或
-    uvicorn philo_rag.server:app --port 8000
+启动（唯一入口）：
+    python -m philo_rag                    # 默认 127.0.0.1:8000
+    python -m philo_rag --port 8800 --config config.yaml
 
 接口：
-    GET  /                    单页界面（静态资源在 philo_rag/web/ 下）
-    GET  /assets/styles.css   界面样式
-    GET  /assets/app.js       界面逻辑
+    GET  /                    单页界面（Vite 产物 philo_rag/web/dist/index.html）
+    GET  /assets/*            Vite 产出的脚本与样式（StaticFiles）
     GET  /api/stats           索引概览（含当前生成后端）
     GET  /api/facets          分面统计（筛选维度）
     GET  /api/units           体系目录（卷 → 单元）
@@ -21,9 +19,10 @@
     GET  /api/quote?...       引文检索（按理论家 / 说话人 / 概念 / 单元精确过滤）
     GET  /api/context?...     取某块及其上下文（用于「查看上下文」）
 
-前后端分离方式：后端只提供 JSON API，界面是 `philo_rag/web/` 下的纯静态文件
-（HTML + CSS + 原生 JS，无构建步骤）。二者只通过 HTTP 接口耦合，前端可独立替换。
-索引在进程启动时加载一次并常驻内存（BM25 与向量都在内存里，单机场景足够快）。
+前后端分离方式：后端只提供 JSON API，界面是 `frontend/` 经 Vite 构建到
+`philo_rag/web/dist` 的静态产物（Svelte 5 + 原生 Canvas 2D）。二者只通过 HTTP
+接口耦合，前端可独立替换。索引在进程启动时加载一次并常驻内存
+（BM25 与向量都在内存里，单机场景足够快）。
 """
 from __future__ import annotations
 
@@ -33,7 +32,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import conv
@@ -58,15 +58,33 @@ class Runtime:
 # 避免同一索引被重复载入两次（那要白等一整轮「载入索引 + 加载模型」）。
 _RUNTIME: Runtime | None = None
 
-# 前端静态资源目录（随包分发）
+# 前端构建产物目录（Vite outDir；随包分发，见 pyproject 的 package-data）
 _WEB_DIR = Path(__file__).resolve().parent / "web"
+_DIST_DIR = _WEB_DIR / "dist"
+_STARMAP_PATH = _WEB_DIR / "data" / "starmap.json"
 
 
-def _read_web(name: str) -> str:
-    path = _WEB_DIR / name
+def _index_html() -> Path:
+    path = _DIST_DIR / "index.html"
     if not path.exists():
-        raise HTTPException(500, f"前端资源缺失：{path}")
-    return path.read_text(encoding="utf-8")
+        raise HTTPException(500, f"前端产物缺失：{path}（先运行 npm run build）")
+    return path
+
+
+# 星图文件只在 mtime 变化时重新解析：请求是高频的，但重跑 build_starmap.py 才是低频的
+_STARMAP_CACHE: dict[str, Any] = {"mtime": None, "payload": None}
+
+
+def _load_starmap() -> dict[str, Any]:
+    if not _STARMAP_PATH.exists():
+        raise HTTPException(404, "星图数据未生成（先运行 python scripts/build_starmap.py）")
+    mtime = _STARMAP_PATH.stat().st_mtime
+    if _STARMAP_CACHE["mtime"] != mtime:
+        import json as _json
+
+        _STARMAP_CACHE["payload"] = _json.loads(_STARMAP_PATH.read_text(encoding="utf-8"))
+        _STARMAP_CACHE["mtime"] = mtime
+    return _STARMAP_CACHE["payload"]
 
 
 # --------------------------------------------------------------------------- #
@@ -95,7 +113,7 @@ def _load(cfg: dict) -> Runtime:
     """装配（或复用）进程内常驻的索引与词典，返回各请求共用的 Runtime。"""
     global _RUNTIME
 
-    from .cli import get_lexicon
+    from .bootstrap import BUILD_HINT, get_lexicon
 
     store_dir = Path(cfg["doc"]["store_dir"])
 
@@ -106,7 +124,7 @@ def _load(cfg: dict) -> Runtime:
 
     lex = get_lexicon(cfg)
     if not (store_dir / "chunks.jsonl").exists():
-        raise SystemExit(f"索引不存在：{store_dir}\n请先运行：python -m philo_rag.cli build")
+        raise SystemExit(f"索引不存在：{store_dir}\n{BUILD_HINT}")
 
     t0 = time.perf_counter()
     store = Store.load(store_dir, lex, cfg)
@@ -143,32 +161,29 @@ def create_app(cfg: dict) -> FastAPI:
     async def _on_runtime_error(_req: Request, exc: RuntimeError) -> JSONResponse:
         return JSONResponse(status_code=502, content={"detail": str(exc)})
 
-    # ---------------- 前端静态资源 ----------------
-    @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return _read_web("index.html")
+    # ---------------- 前端静态资源（Vite 产物） ----------------
+    # 带哈希文件名的 JS/CSS 交给 StaticFiles：它自带路径穿越防护，
+    # 也自带 ETag/Last-Modified，不必再手写放行后缀的白名单。
+    _assets = _DIST_DIR / "assets"
+    if _assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
 
-    @app.get("/assets/{path:path}")
-    def asset(path: str) -> Response:
-        """按 web/ 下的相对路径服务前端资源（css/*.css、js/*.js）。
+    @app.get("/", include_in_schema=False)
+    def index() -> FileResponse:
+        return FileResponse(_index_html(), media_type="text/html; charset=utf-8")
 
-        原来是写死的两条路由（/assets/styles.css、/assets/app.js）；前端拆成多文件后，
-        新增的 css/ 与 js/ 子目录没有任何路由能服务，页面会取不到文件，因此改为按子路径透传。
-        只放行 .css/.js，并拒绝任何跳出 web/ 的路径（..、绝对路径），避免变成任意文件读取。
-        """
-        rel = Path(path)
-        if rel.is_absolute() or ".." in rel.parts or rel.suffix not in {".css", ".js"}:
-            raise HTTPException(404, f"资源不存在：{path}")
-        target = (_WEB_DIR / rel).resolve()
-        if _WEB_DIR.resolve() not in target.parents or not target.is_file():
-            raise HTTPException(404, f"资源不存在：{path}")
-        media = ("text/css; charset=utf-8" if rel.suffix == ".css"
-                 else "application/javascript; charset=utf-8")
-        return Response(target.read_text(encoding="utf-8"), media_type=media)
-
-    @app.get("/favicon.ico")
+    @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
+        icon = _DIST_DIR / "favicon.ico"
+        if icon.is_file():
+            return FileResponse(icon)
         return Response(status_code=204)
+
+    # ---------------- 星图数据 ----------------
+    @app.get("/api/starmap")
+    def starmap() -> JSONResponse:
+        """星图节点/边/坐标/别名/词典指纹；按文件 mtime 缓存，重跑构建脚本即失效。"""
+        return JSONResponse(_load_starmap())
 
     # ---------------- JSON API ----------------
     @app.get("/api/stats")
@@ -385,6 +400,25 @@ def create_app(cfg: dict) -> FastAPI:
             ],
         }
 
+    # SPA 回退必须最后注册：放在 /api/* 之前会把这些接口一起吃掉
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa_fallback(path: str) -> FileResponse:
+        """未知的非 /api 路径一律回 index.html（单页应用的客户端路由）。
+
+        dist 里真实存在的文件（如 data/starmap.json）优先原样返回；
+        /api/* 的未命中必须是 404，否则前端会把一段 HTML 当成 JSON 解析。
+        """
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, f"接口不存在：/{path}")
+        if ".." in Path(path).parts:
+            # 回退只服务 dist 里的真实文件；越界路径一律 404，别让它静默返回首页
+            raise HTTPException(404, f"资源不存在：/{path}")
+        target = (_DIST_DIR / path).resolve()
+        dist = _DIST_DIR.resolve()
+        if target.is_file() and (target == dist or dist in target.parents):
+            return FileResponse(target)
+        return FileResponse(_index_html(), media_type="text/html; charset=utf-8")
+
     return app
 
 
@@ -409,30 +443,49 @@ def _chunk_json(c: Chunk, lex: Lexicon, store: Store) -> dict:
     }
 
 
-def serve(cfg: dict, host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
+def serve(cfg: dict, host: str = "127.0.0.1", port: int = 8000) -> None:
     import uvicorn
 
-    if reload:
-        # reload 模式会重新导入模块、丢掉内存索引，这里退化为非 reload
-        print("[warn] --reload 与内存索引不兼容，已按非 reload 启动")
     app = create_app(cfg)
     print(f"哲学大纲知识库已启动 →  http://{host}:{port}", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """唯一入口 `python -m philo_rag`：只解析 --host/--port/--config，不做子命令。"""
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m philo_rag", description="哲学大纲知识库 · Web 服务")
+    ap.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
+    ap.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
+    ap.add_argument("--config", default="config.yaml", help="配置文件路径（默认 config.yaml）")
+    args = ap.parse_args(argv)
+
+    from .bootstrap import load_config
+
+    serve(load_config(Path(args.config)), host=args.host, port=args.port)
+    return 0
 
 
 def _default_app() -> FastAPI | None:
     """供 `uvicorn philo_rag.server:app` 使用：按当前目录的 config.yaml 装配。
 
     索引缺失或配置找不到时返回 None —— 那种情况请改用
-    `python -m philo_rag.cli serve`，它会在启动前给出明确提示。
+    `python -m philo_rag`，它会在启动前给出明确提示。
     """
     try:
-        from .cli import load_config
+        from .bootstrap import load_config
 
         return create_app(load_config(Path("config.yaml")))
     except Exception as exc:  # noqa: BLE001
-        print(f"[warn] 导入时无法装配应用（{exc}）；请用 `python -m philo_rag.cli serve` 启动")
+        print(f"[warn] 导入时无法装配应用（{exc}）；请用 `python -m philo_rag` 启动")
         return None
 
 
-app = _default_app()
+def __getattr__(name: str):
+    """惰性提供 `app`：`uvicorn philo_rag.server:app` 仍然可用，
+    但 `python -m philo_rag --help` 这类导入不必先白等一轮索引与模型加载。
+    """
+    if name == "app":
+        return _default_app()
+    raise AttributeError(name)

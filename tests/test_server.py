@@ -144,22 +144,44 @@ def test_compare_endpoint_returns_two_sides(client):
     assert missing["terms"][0]["found"] is False and missing["terms"][1]["found"] is True
 
 
-def test_static_assets_are_served(client):
-    """前端拆成 css/ 与 js/ 子目录后，资源按子路径服务。
+def test_dist_index_and_assets_are_served(client):
+    """静态资源来自 Vite 产物 web/dist：首页、带哈希的资源、SPA 回退。
 
-    旧的两条单文件路径必须 404——它们已随拆分删除，留着 200 会让人误以为还在单文件时代。
+    旧版是「/assets/{path} 只放行 css/js」的手写白名单；改成 StaticFiles 之后
+    契约变成「dist 里的文件原样服务，其余非 /api 路径回 index.html」。
     """
-    assert client.get("/").status_code == 200
-    assert client.get("/assets/css/1-tokens.css").status_code == 200
-    assert client.get("/assets/js/00-ns.js").status_code == 200
-    assert client.get("/assets/app.js").status_code == 404
-    assert client.get("/assets/styles.css").status_code == 404
+    from philo_rag.server import _DIST_DIR
+
+    assert (_DIST_DIR / "index.html").is_file(), "先运行 npm run build 生成 web/dist"
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "text/html" in home.headers["content-type"]
+
+    assets = sorted(p.name for p in (_DIST_DIR / "assets").iterdir() if p.is_file())
+    assert assets, "dist/assets 里应当有构建产物"
+    assert client.get("/assets/" + assets[0]).status_code == 200
+
+    # 未知非 /api 路径 → index.html（前端自己决定显示什么）
+    spa = client.get("/some/unknown/view")
+    assert spa.status_code == 200
+    assert "text/html" in spa.headers["content-type"]
 
 
-def test_asset_route_rejects_traversal_and_other_suffixes(client):
-    """通用资源路由只放行 web/ 下的 .css/.js，不能变成任意文件读取。"""
-    assert client.get("/assets/../config.yaml").status_code == 404
-    assert client.get("/assets/js/../index.html").status_code == 404
+def test_unknown_api_and_path_traversal_are_rejected(client):
+    """SPA 回退不能吃掉 /api/*，也不能变成任意文件读取。
+
+    注意用 URL 编码的 ~BT~..~BT~：未编码的 ~BT~/assets/../../config.yaml~BT~ 会被客户端先归一成
+    ~BT~/config.yaml~BT~，测不到服务端的判断。
+    """
+    assert client.get("/api/stats").status_code == 200
+    assert client.get("/api/not-exist").status_code == 404
+    # 越界路径一律 404（返回首页会让人以为「拿到了东西」）
+    assert client.get("/assets/%2e%2e/%2e%2e/config.yaml").status_code == 404
+    assert client.get("/assets/..%2f..%2fconfig.yaml").status_code == 404
+    # 未知非 /api 路径回 index.html，且不是仓库里的文件
+    spa = client.get("/config.yaml")
+    assert spa.status_code == 200 and "text/html" in spa.headers["content-type"]
+    assert "PyYAML" not in spa.text
 
 
 # --------------------------------------------------------------------------- #

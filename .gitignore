@@ -15,6 +15,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# 前端构建产物要随包分发（pip install 后直接可跑），不要被上面的 dist/ 规则吃掉
+!philo_rag/web/dist/
 downloads/
 eggs/
 *.egg-info/
@@ -25,6 +27,7 @@ share/python-wheels/
 
 # Test, coverage, and type-checker artifacts
 .pytest_cache/
+pytest-cache-files-*/
 pytest-of-*/
 .coverage
 .coverage.*
@@ -77,6 +80,17 @@ models/
 .basetemp-*/
 .tmp-*/
 .pt/
+.pytest-tmp/
+.tmp/
+.npm-cache/
+npm-install*.log
+pytest.log
+
+# 前端依赖（构建产物另见 philo_rag/web/dist）
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+config.e2e.yaml
 
 # OS metadata
 .DS_Store

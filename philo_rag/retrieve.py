@@ -187,7 +187,7 @@ def hybrid_search(
     if embedder.dim and store.vectors is not None and embedder.dim != store.vectors.shape[1]:
         raise RuntimeError(
             f"嵌入模型与索引维度不一致：模型 {embedder.dim}D，索引 {store.vectors.shape[1]}D。"
-            f"更换 embedding.model 后请先运行 `python -m philo_rag.cli build` 重建索引。"
+            f"更换 embedding.model 后请先运行 `python scripts/build_index.py` 重建索引。"
         )
     qvec = embedder.encode([expanded])[0]
 

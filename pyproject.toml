@@ -23,14 +23,14 @@ docx = ["python-docx>=1.1"]                 # 解析 Word 语料
 dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27"]  # 测试与静态检查（httpx 供 fastapi TestClient）
 
 [project.scripts]
-philo-rag = "philo_rag.cli:main"
+philo-rag = "philo_rag.server:main"
 
 [tool.setuptools]
 packages = ["philo_rag"]
 
-# 前端静态资源随包分发（纯 HTML/CSS/JS，无构建步骤）
+# 前端构建产物随包分发（Vite outDir = philo_rag/web/dist，产物提交进仓库）
 [tool.setuptools.package-data]
-philo_rag = ["web/*.html", "web/css/*.css", "web/js/*.js"]
+philo_rag = ["web/dist/*", "web/dist/assets/*", "web/data/*.json"]
 
 [tool.ruff]
 target-version = "py310"

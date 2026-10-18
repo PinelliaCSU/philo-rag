@@ -94,7 +94,7 @@ class Lexicon:
                 for x in sorted(self.axes.get("四层", []), key=lambda x: str(x.get("code", "")))
             ]
 
-        # 主题词典（流派/思潮级）；cli.get_lexicon 未透传时按词典同目录回退，
+        # 主题词典（流派/思潮级）；bootstrap.get_lexicon 未透传时按词典同目录回退，
         # 该目录与 config.yaml 中 lexicon.themes 的配置路径一致。
         if themes_path is None:
             themes_path = philosophers_path.parent / "themes.yaml"

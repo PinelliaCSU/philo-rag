@@ -7,8 +7,8 @@ RAG 系统最容易「看起来能跑、实际上不准」，所以把 Hit@k 与
 而关键词标注在分块策略变化后依然有效。
 
 标注集针对《哲学大纲》语料：覆盖体系核心（字头/四层/话语）、四卷各自的关键议题。
-自定义标注集可用 `python -m philo_rag.cli eval --golden my.json`，格式为
-`[{"q": "问题", "must": ["必须出现在命中块里的关键词"]}, ...]`。
+本模块只作为 pytest 的检索基线工具（见 tests/test_retrieval.py），不再对外提供 CLI 评测入口；
+自定义标注集的格式仍为 `[{"q": "问题", "must": ["必须出现在命中块里的关键词"]}, ...]`。
 """
 from __future__ import annotations
 

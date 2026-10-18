@@ -68,76 +68,75 @@ Ollama 服务。
 
 ## 快速开始
 
-项目已包含清洗后的语料和索引。直接启动 Web 界面：
+项目已包含清洗后的语料、索引与星图布局。唯一入口是 Web 服务：
 
 ```powershell
-python -m philo_rag.cli serve
+python -m philo_rag                      # 默认 127.0.0.1:8000
+python -m philo_rag --port 8800 --config config.yaml
 ```
 
-浏览器打开 <http://127.0.0.1:8000>。
+浏览器打开 <http://127.0.0.1:8000>。界面是「星图纸页」：暗色雾面、无导航、无输入框；
+星图只由回答命中的概念点亮，答案收束为一张无边界纸页，引用藏在句末极淡的圆点里，
+收藏按需从底部升起。
 
-如果修改了语料、分块参数、词典或嵌入模型，需要重新构建索引：
+如果改了语料、分块参数、词典或嵌入模型，重建索引与星图（这两个是维护脚本，不是用户 CLI）：
 
 ```powershell
-python -m philo_rag.cli prepare  # 从 doc.raw 生成清洗后的语料
-python -m philo_rag.cli build
-python -m philo_rag.cli stats    # 概览 + 索引一致性；--verify 不一致时返回退出码 1
+python scripts/build_index.py --prepare   # 先从 doc.raw 清洗语料，再重建索引
+python scripts/build_index.py             # 只重建索引
+python scripts/build_starmap.py           # 重新生成星图布局 philo_rag/web/data/starmap.json
 ```
 
-只修改回答后端或 API 配置时，不需要重建索引。分块参数或词典改动后，
-`stats` / `stats --verify` 会直接指出索引已与配置不一致，照提示重建即可。
+只改回答后端或 API 配置时不需要重建索引；分块参数或词典改动后，服务启动会打印索引与配置
+不一致的提示，照提示重建即可。
 
-## 命令行用法
+## 界面
 
-所有命令都可以通过 `--config` 指定其他配置文件。
+四层，自下而上：星图雾面 → 输入线 → 纸页 → 浮层（引用薄层 / 星匣 / 低语层）。
 
-```powershell
-# 溯源回答
-python -m philo_rag.cli ask "什么是字头？"
-python -m philo_rag.cli ask "马克思在体系中的位置" --strategy theme
-
-# 术语检索
-python -m philo_rag.cli term "客体小a"
-
-# 引文检索
-python -m philo_rag.cli quote --speaker 拉康 --limit 20
-python -m philo_rag.cli quote --unit 3-2 --keyword "主体"
-
-# 分面统计
-python -m philo_rag.cli facets
-
-# 术语表（词典条目 + 命中块/引文块/首见单元）
-python -m philo_rag.cli glossary --format md --out outputs/术语表.md
-
-# 输出为文件
-python -m philo_rag.cli ask "什么是存在者整体？" --format md --out outputs/存在者整体.md
-
-# 一键检查检索链路
-python -m philo_rag.cli demo
-```
-
-`ask` 的 `--strategy` 可选：
-
-- `auto`：根据问题自动判定，默认值。
-- `point`：适合“什么是 X”“X 出自哪里”等定位式问题。
-- `theme`：适合“X 的思想脉络”“X 在体系中的位置”等主题式问题。
-
-常用输出格式为 `md`、`json`、`jsonl`、`csv` 和 `txt`。
+- **输入线**：页面中心唯一入口，无边框无底色；`Enter` 提交、`Shift+Enter` 换行、`Esc` 分级关闭，
+  中文输入法组字中的 Enter 不会误提交。
+- **纸页**：五种纸页共用同一种排版——回答 / 概念 / 体系地图 / 单元阅读 / 对比。
+- **引用点**：句末 3–4px 圆点，多引用聚合成一个；`Tab` 可达，`Enter` 在底部升起引用薄层。
+- **低语层**：输入线为空时按 `/` 打开，前缀切换模式——默认`点`（概念）、`引 `（引文）、
+  `脉 `（主题/范围）、`读 `（单元）、`图 `（体系地图）、`对 `（对比）。
+- **收藏与星匣**：`S` 收藏当前聚焦对象（问题 / 回答 / 引用 / 概念），`F` 从底部升起星匣，
+  可搜索、删除、跳回，并导出 JSON（全部回答）与 Markdown（收藏）。
 
 ## Web 服务参数
 
 ```powershell
-python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
+python -m philo_rag --host 127.0.0.1 --port 8000 --config config.yaml
 ```
 
-服务同时提供 JSON API，前端是一个主视图 + 四个可召唤面板：
+JSON API 与 SSE 契约见下表；SSE 事件顺序恒为 `meta → delta… → done`，不新增事件类型。
 
-1. **溯源回答**（主视图）：提问并查看逐条引用；引用卡可「查看上下文」或收藏。
-2. **概念卡**：定义与出处、单元分布、共现理论家、**相关概念**（同块共现）、所属主题，
-   并可一键转成「什么是 X？」或「X 在体系中的位置」提问。
-3. **检索**：在术语检索和引文检索之间切换。
-4. **体系地图**：字头 × 位面浏览；点单元打开**单元导览**（子单元、术语、理论家、原文块列表）。
-5. **笔记**：把引用卡 / 原文块收藏到浏览器本地（localStorage），加批注并导出 Markdown。
+| 接口 | 用途 |
+| --- | --- |
+| `GET /api/stats` | 索引/模型/会话能力 |
+| `GET /api/facets` | 分面统计 |
+| `GET /api/units` · `GET /api/unit?code=` | 体系目录 · 单元导览与连续阅读 |
+| `GET /api/concepts` · `GET /api/concept?term=` | 概念全量（低语层本地搜索）· 概念纸页 |
+| `GET /api/compare?a=&b=` | 对比纸页 |
+| `GET /api/term?term=` | 低语层「点」的语义补充 |
+| `GET /api/quote?…` | 低语层「引」 |
+| `GET /api/context?chunk_id=` | 引用正文回捞 |
+| `GET /api/starmap` | 星图节点/边/坐标/别名/词典指纹 |
+| `POST /api/ask` · `POST /api/ask_stream` | 非流式回退 · SSE 主路径 |
+
+## 前端构建
+
+```powershell
+cd frontend
+npm install
+npm run build      # 产物进 philo_rag/web/dist（已提交进仓库，pip 装完即可运行）
+npm run dev        # 开发服务器，/api 代理到 127.0.0.1:8000
+npm run test       # vitest
+npm run e2e        # playwright（需先 npx playwright install chromium）
+```
+
+若所在环境不允许子进程管道（部分沙箱 / 受控机），用 `npm run build:restricted` 与
+`npm run test:restricted`：它们只是关掉 esbuild 的转译与压缩，产物仍是可运行的 ESM。
 
 服务同时提供 JSON API，常用接口如下：
 
@@ -156,8 +155,10 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 
 ```powershell
 pip install -e ".[dev]"          # pytest + ruff（httpx 供 fastapi TestClient）
-python -m pytest                 # 全量回归；索引与模型只装载一次，约 1 分钟
+python -m pytest                 # 后端全量回归；索引与模型只装载一次
 python -m ruff check philo_rag scripts tests
+cd frontend; npm run test        # 前端单元测试（citations / terms / db / starmap）
+cd frontend; npm run e2e         # 关键路径的端到端检查
 ```
 
 `pytest` 里冻结了检索基线（Hit@1 ≥ 96.43%、Hit@3 = 100%、MRR ≥ 0.9821），
@@ -173,10 +174,12 @@ data/                       清洗后的语料
 lexicon/                    理论家、概念和体系词典
 models/                     本地嵌入与重排模型
 store/                      索引文件
-outputs/                    导出的回答和检索结果
-philo_rag/                  Python 包、CLI、服务端和前端
+philo_rag/                  Python 包（检索与生成链路、Web 服务、Vite 产物）
+philo_rag/web/dist/         Vite 构建产物（提交进仓库）
+philo_rag/web/data/         星图布局 starmap.json
+frontend/                   Svelte 5 + Vite 源码、Vitest 与 Playwright 用例
 tests/                      pytest 回归用例
-scripts/                    巡检与诊断脚本（闸门 / 说话人 / 连通性 / 基准）
+scripts/                    维护脚本：build_index.py / build_starmap.py
 docs/                       详细使用与架构说明
 ```
 

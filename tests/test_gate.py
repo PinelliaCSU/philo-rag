@@ -1,12 +1,12 @@
-"""问题闸门（philo_rag/gate.py）：放行 / 拦截用例，复用 scripts/check_gate.py 的用例表。"""
+"""问题闸门（philo_rag/gate.py）：放行 / 拦截用例，复用 tests/gate_cases.py 的用例表。"""
 from __future__ import annotations
 
 import pytest
 
 from philo_rag.gate import check_question, skip_answer
-from scripts.check_gate import CASES, RELEVANCE_CASES, combined_gate
+from gate_cases import CASES, RELEVANCE_CASES, combined_gate
 
-# 语义相关性用例要逐条跑一次检索，抽一部分代表用例即可（全量见 scripts/check_gate.py --relevance）
+# 语义相关性用例要逐条跑一次检索，抽一部分代表用例即可（全量见 tests/gate_cases.py）
 RELEVANCE_SAMPLE = RELEVANCE_CASES[:3] + RELEVANCE_CASES[-4:]
 
 
