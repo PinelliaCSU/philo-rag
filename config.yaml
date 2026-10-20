@@ -58,7 +58,7 @@ retrieval:
   entity_boost: 0.004       # 查询实体被块元数据命中时的加分（消除 RRF 平票）
   definition_boost: 0.02    # 问「什么是 X」时，块内出现 X 定义句式的加分
   # 元数据通道：把「查询实体 ∩ 块注解」做成一路排名并入 RRF（比 entity_boost 强得多）。
-  # 0 = 关闭（默认，保持基线不变）；开启请先 `build` 重建索引并复跑 `eval` 对比
+  # 0 = 关闭（默认，保持基线不变）；开启需离线重建索引，并复跑检索回归对比
   # Hit@1 / MRR，建议从 0.3–0.5 试起。section_* 是推断注解，按权重打折计入。
   meta_weight: 0.0
   meta_top_k: 40            # 元数据通道候选数
@@ -149,7 +149,7 @@ theme:
 #           off_topic 实时信息与通用任务 / no_anchor 无锚点又无实词 /
 #           irrelevant 语义相关性兜底（与语料相似度过低的无锚点问题）
 gate:
-  enabled: true             # false 则所有问题都进入检索（等价于 CLI 的 --no-gate）
+  enabled: true             # false 则所有问题都进入检索
   min_chars: 4              # 归一化后短于此长度、且无锚点无实词时判为退化输入
   strict: false             # true 时「无词典/体系锚点」的问题一律拦截（更严，易误杀）
   hint: ""                  # 跳过时给出的改写建议；留空使用内置默认文案
@@ -168,11 +168,3 @@ conversation:
   max_turns: 4           # 单会话保留轮次（改写只需最近 1–2 轮，其余留给后续显示）
   digest_chars: 300      # 上一轮要点注入上限（范围查询改用结构化字段，不取正文）
   max_conversations: 64  # 进程内会话数上限，超出按最久未用淘汰
-
-# ---------- 7. 结果输出 ----------
-output:
-  format: md                # md | json | jsonl | csv | txt（CLI --format 可覆盖）
-  dir: outputs              # 输出目录
-  show_citations: true      # 是否附引用来源
-  citation_style: full      # full（书名·章节·字符区间）| short（章节）
-  top_k: 8

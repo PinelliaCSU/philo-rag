@@ -187,7 +187,7 @@ def hybrid_search(
     if embedder.dim and store.vectors is not None and embedder.dim != store.vectors.shape[1]:
         raise RuntimeError(
             f"嵌入模型与索引维度不一致：模型 {embedder.dim}D，索引 {store.vectors.shape[1]}D。"
-            f"更换 embedding.model 后请先运行 `python -m philo_rag.cli build` 重建索引。"
+            f"更换 embedding.model 后需要重建索引。"
         )
     qvec = embedder.encode([expanded])[0]
 
@@ -395,7 +395,7 @@ def _birth(lex: Lexicon, chunk: Chunk) -> int:
 
 
 def _as_list(v: str | list[str] | None) -> list[str] | None:
-    """兼容「单个字符串」与「列表」两种传参（CLI 的 --philosopher 是 append 型）。"""
+    """兼容「单个字符串」与「列表」两种传参。"""
     if v is None:
         return None
     return list(v) if isinstance(v, (list, tuple)) else [v]
@@ -466,7 +466,7 @@ def quote_search(
 
 
 def quote_payload(store: Store, lex: Lexicon, **kw) -> dict[str, Any]:
-    """引文检索的结构化结果（供 CLI / Web / 批处理统一渲染）。"""
+    """引文检索的结构化结果（供 Web / 批处理统一渲染）。"""
     quotes = quote_search(store, lex, **kw)
     doc_title = store.manifest.get("doc_title", "")
     return {
@@ -526,7 +526,7 @@ def glossary_payload(store: Store, lex: Lexicon) -> dict[str, Any]:
     纯元数据统计，不做向量检索：命中数来自 `terms.json` 的 concept 倒排，
     「首见单元」取该术语标注块里 seq 最小的一块（阅读顺序上的第一次出现），
     引文数取与引文块的交集。没有命中的条目单独列在 `unused` 里——
-    这正是 `scripts/discover_terms.py` 想要的「配了却从未出现」清单。
+    `unused` 即「配了却从未出现」的清单，便于发现笔误与死别名。
     """
     quote_ids = {c.chunk_id for c in store.quotes()}
     entries: list[dict[str, Any]] = []

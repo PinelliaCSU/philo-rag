@@ -1,9 +1,7 @@
 """Web 服务层：把检索入口暴露为 HTTP API，并托管内置单页界面。
 
 启动：
-    python -m philo_rag.cli serve --port 8000
-    # 或
-    uvicorn philo_rag.server:app --port 8000
+    uvicorn philo_rag.server:app --host 127.0.0.1 --port 8000
 
 接口：
     GET  /                    单页界面（静态资源在 philo_rag/web/ 下）
@@ -54,8 +52,8 @@ class Runtime:
     lex: Lexicon
 
 
-# 模块级 `app` 与 serve() 会各装配一次应用，这里缓存已装配的那一份，
-# 避免同一索引被重复载入两次（那要白等一整轮「载入索引 + 加载模型」）。
+# 同一进程内可能多次装配应用，这里缓存已装配的那一份，避免索引被重复载入
+# （那要白等一整轮「载入索引 + 加载模型」）。
 _RUNTIME: Runtime | None = None
 
 # 前端静态资源目录（随包分发）
@@ -95,7 +93,7 @@ def _load(cfg: dict) -> Runtime:
     """装配（或复用）进程内常驻的索引与词典，返回各请求共用的 Runtime。"""
     global _RUNTIME
 
-    from .cli import get_lexicon
+    from .config import open_store
 
     store_dir = Path(cfg["doc"]["store_dir"])
 
@@ -104,12 +102,8 @@ def _load(cfg: dict) -> Runtime:
         _RUNTIME.cfg = cfg
         return _RUNTIME
 
-    lex = get_lexicon(cfg)
-    if not (store_dir / "chunks.jsonl").exists():
-        raise SystemExit(f"索引不存在：{store_dir}\n请先运行：python -m philo_rag.cli build")
-
     t0 = time.perf_counter()
-    store = Store.load(store_dir, lex, cfg)
+    store, lex = open_store(cfg)
     print(f"[info] 索引已载入：{len(store.chunks)} 块（{time.perf_counter() - t0:.1f}s）", flush=True)
     _RUNTIME = Runtime(cfg=cfg, store=store, lex=lex)
 
@@ -409,30 +403,11 @@ def _chunk_json(c: Chunk, lex: Lexicon, store: Store) -> dict:
     }
 
 
-def serve(cfg: dict, host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
-    import uvicorn
+def create_configured_app() -> FastAPI:
+    """从当前目录读取 config.yaml 并装配 ASGI 应用（供 uvicorn 直接加载）。"""
+    from .config import load_config
 
-    if reload:
-        # reload 模式会重新导入模块、丢掉内存索引，这里退化为非 reload
-        print("[warn] --reload 与内存索引不兼容，已按非 reload 启动")
-    app = create_app(cfg)
-    print(f"哲学大纲知识库已启动 →  http://{host}:{port}", flush=True)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    return create_app(load_config(Path("config.yaml")))
 
 
-def _default_app() -> FastAPI | None:
-    """供 `uvicorn philo_rag.server:app` 使用：按当前目录的 config.yaml 装配。
-
-    索引缺失或配置找不到时返回 None —— 那种情况请改用
-    `python -m philo_rag.cli serve`，它会在启动前给出明确提示。
-    """
-    try:
-        from .cli import load_config
-
-        return create_app(load_config(Path("config.yaml")))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[warn] 导入时无法装配应用（{exc}）；请用 `python -m philo_rag.cli serve` 启动")
-        return None
-
-
-app = _default_app()
+app = create_configured_app()

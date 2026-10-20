@@ -154,7 +154,7 @@ class Store:
         if not source.exists():
             raise SystemExit(
                 f"清洗后的语料不存在：{source}\n"
-                f"请先运行：python -m philo_rag.cli prepare"
+                f"请先准备清洗后的语料文件。"
             )
         chunks, title = build_document(source, doc_cfg["id"], lex, cfg["chunk"])
         st.chunks = chunks
@@ -309,7 +309,7 @@ class Store:
         if int(st.manifest.get("annotation_version", 1)) < ANNOTATION_VERSION:
             print(
                 f"[philo-rag] 索引缺少新版注解（坐标 / 章节级注解）：{store_dir}\n"
-                f"            运行 `python -m philo_rag.cli build` 重建后生效。",
+                f"            重建索引后生效。",
                 file=sys.stderr,
             )
         # 分块参数 / 词典变更同样会让索引与配置对不上；cfg 传入时逐项提示
@@ -318,13 +318,13 @@ class Store:
                 print(
                     f"[philo-rag] {problem}\n"
                     f"            索引目录：{store_dir}\n"
-                    f"            确认后运行 `python -m philo_rag.cli build` 重建（可用 `stats --verify` 查看详情）。",
+                    f"            确认后重建索引。",
                     file=sys.stderr,
                 )
         return st
 
     def check_consistency(self, cfg: dict[str, Any], lex: Lexicon) -> list[str]:
-        """当前索引与配置/词典的不一致清单（CLI `stats --verify` 与测试复用）。"""
+        """当前索引与配置/词典的不一致清单（测试与运维检查复用）。"""
         return manifest_drift(self.manifest, cfg, lex)
 
     # ---------------- 过滤 ----------------

@@ -1,7 +1,7 @@
 """索引一致性护栏（philo_rag/index.py）：分块参数 / 词典指纹。
 
 守护的是「改了配置或词典却忘了重建索引」这类隐性故障：manifest 记录指纹，
-加载时比对告警，`stats --verify` 可脚本化判定。
+加载时比对告警，`manifest_drift()` 可脚本化判定。
 """
 from __future__ import annotations
 

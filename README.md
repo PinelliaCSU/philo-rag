@@ -68,69 +68,19 @@ Ollama 服务。
 
 ## 快速开始
 
-项目已包含清洗后的语料和索引。直接启动 Web 界面：
+项目已包含清洗后的语料和索引。启动 Web 服务（项目唯一的运行入口）：
 
 ```powershell
-python -m philo_rag.cli serve
+python -m uvicorn philo_rag.server:app --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000>。
+浏览器打开 <http://127.0.0.1:8000>。启动时从当前目录读取 `config.yaml`，并加载配置中指定的索引。
+部署目录应保留 `config.yaml`、`data/`、`lexicon/`、`models/` 和 `store/`。
 
-如果修改了语料、分块参数、词典或嵌入模型，需要重新构建索引：
+项目不提供命令行查询、建索引或维护入口；语料处理及索引构建属于离线维护流程，不随网页服务运行。
+如需更换索引，请预先准备好完整的 `store/` 目录，并按需更新 `config.yaml`。
 
-```powershell
-python -m philo_rag.cli prepare  # 从 doc.raw 生成清洗后的语料
-python -m philo_rag.cli build
-python -m philo_rag.cli stats    # 概览 + 索引一致性；--verify 不一致时返回退出码 1
-```
-
-只修改回答后端或 API 配置时，不需要重建索引。分块参数或词典改动后，
-`stats` / `stats --verify` 会直接指出索引已与配置不一致，照提示重建即可。
-
-## 命令行用法
-
-所有命令都可以通过 `--config` 指定其他配置文件。
-
-```powershell
-# 溯源回答
-python -m philo_rag.cli ask "什么是字头？"
-python -m philo_rag.cli ask "马克思在体系中的位置" --strategy theme
-
-# 术语检索
-python -m philo_rag.cli term "客体小a"
-
-# 引文检索
-python -m philo_rag.cli quote --speaker 拉康 --limit 20
-python -m philo_rag.cli quote --unit 3-2 --keyword "主体"
-
-# 分面统计
-python -m philo_rag.cli facets
-
-# 术语表（词典条目 + 命中块/引文块/首见单元）
-python -m philo_rag.cli glossary --format md --out outputs/术语表.md
-
-# 输出为文件
-python -m philo_rag.cli ask "什么是存在者整体？" --format md --out outputs/存在者整体.md
-
-# 一键检查检索链路
-python -m philo_rag.cli demo
-```
-
-`ask` 的 `--strategy` 可选：
-
-- `auto`：根据问题自动判定，默认值。
-- `point`：适合“什么是 X”“X 出自哪里”等定位式问题。
-- `theme`：适合“X 的思想脉络”“X 在体系中的位置”等主题式问题。
-
-常用输出格式为 `md`、`json`、`jsonl`、`csv` 和 `txt`。
-
-## Web 服务参数
-
-```powershell
-python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
-```
-
-服务同时提供 JSON API，前端是一个主视图 + 四个可召唤面板：
+服务提供 JSON API，前端是一个主视图 + 多个可召唤面板：
 
 1. **溯源回答**（主视图）：提问并查看逐条引用；引用卡可「查看上下文」或收藏。
 2. **概念卡**：定义与出处、单元分布、共现理论家、**相关概念**（同块共现）、所属主题，
@@ -139,7 +89,7 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 4. **体系地图**：字头 × 位面浏览；点单元打开**单元导览**（子单元、术语、理论家、原文块列表）。
 5. **笔记**：把引用卡 / 原文块收藏到浏览器本地（localStorage），加批注并导出 Markdown。
 
-服务同时提供 JSON API，常用接口如下：
+常用接口如下：
 
 | 接口 | 用途 |
 | --- | --- |
@@ -157,7 +107,7 @@ python -m philo_rag.cli serve --host 127.0.0.1 --port 8000
 ```powershell
 pip install -e ".[dev]"          # pytest + ruff（httpx 供 fastapi TestClient）
 python -m pytest                 # 全量回归；索引与模型只装载一次，约 1 分钟
-python -m ruff check philo_rag scripts tests
+python -m ruff check philo_rag tests
 ```
 
 `pytest` 里冻结了检索基线（Hit@1 ≥ 96.43%、Hit@3 = 100%、MRR ≥ 0.9821），
@@ -173,10 +123,9 @@ data/                       清洗后的语料
 lexicon/                    理论家、概念和体系词典
 models/                     本地嵌入与重排模型
 store/                      索引文件
-outputs/                    导出的回答和检索结果
-philo_rag/                  Python 包、CLI、服务端和前端
+outputs/                    既有导出产物
+philo_rag/                  Web 服务端与前端
 tests/                      pytest 回归用例
-scripts/                    巡检与诊断脚本（闸门 / 说话人 / 连通性 / 基准）
 docs/                       详细使用与架构说明
 ```
 

@@ -292,20 +292,3 @@ def prepare(source: Path, dest: Path, *, strip_annotations: bool = False,
         "units": n_unit,
         "chars": len(text),
     }
-
-
-if __name__ == "__main__":  # 便于单独调试：python -m philo_rag.prepare <src> <dst>
-    import argparse
-    import json
-
-    ap = argparse.ArgumentParser(description="哲学大纲语料采集与清洗")
-    ap.add_argument("source", type=Path)
-    ap.add_argument("dest", type=Path)
-    ap.add_argument("--strip-annotations", action="store_true")
-    ap.add_argument("--keep-front-matter", action="store_true")
-    a = ap.parse_args()
-    print(json.dumps(
-        prepare(a.source, a.dest,
-                strip_annotations=a.strip_annotations,
-                skip_front_matter=not a.keep_front_matter),
-        ensure_ascii=False, indent=2))

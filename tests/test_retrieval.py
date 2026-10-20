@@ -66,7 +66,7 @@ def test_reranker_available_when_model_is_shipped(cfg):
 
 @pytest.mark.parametrize("topic", ["马克思", "精神分析", "康德"])
 def test_theme_search_returns_structural_context(topic, store, lex, cfg):
-    """范围查询的召回结构（原 scripts/verify_theme.py 的断言）。"""
+    """范围查询的召回结构。"""
     res = theme_search(store, lex, topic, cfg)
     assert res["context"] and res["context_chars"] > 0
     assert res["units"], f"{topic} 未聚合出任何单元"

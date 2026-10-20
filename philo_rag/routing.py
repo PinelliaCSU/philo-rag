@@ -35,7 +35,7 @@ from .text_rules import (
 #             回答按体系结构分节、数千字，与离线时代的「专题提炼稿」同量级。
 #
 # 两者共用同一索引与同一返回结构（answer + citations），对用户是同一个入口，
-# 差别只体现在回答的深度与覆盖面。`ask --strategy auto|point|theme` 可显式指定。
+# 差别只体现在回答的深度与覆盖面。网页端可显式指定「自动 / 点查询 / 范围查询」。
 # 词表集中在 text_rules（与 gate 的提问句式同源）；**次序即语义**，勿按字母序重排
 RE_THEME_QUERY = re.compile("(" + phrase_alternation(THEME_QUERY_PHRASES) + ")")
 RE_POINT_QUERY = re.compile("(" + phrase_alternation(POINT_QUERY_PHRASES) + ")")

@@ -1,4 +1,4 @@
-"""术语表导出（retrieve.glossary_payload + output.render_glossary）。
+"""术语表结构（retrieve.glossary_payload）。
 
 术语表是「词典 × 索引」的对照视图：既给出词典里的定义与归属，也给出每个概念
 在本索引中的落点（命中块 / 引文块 / 首见单元），因此它能直接回答两个运维问题——
@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-from philo_rag.output import FORMATS, render
 from philo_rag.retrieve import glossary_payload
 
 
@@ -39,9 +38,3 @@ def test_unused_entries_are_listed(store, lex):
     res = glossary_payload(store, lex)
     unused = [e["name"] for e in res["entries"] if e["hits"] == 0]
     assert res["unused"] == unused
-
-
-def test_every_format_renders(store, lex):
-    res = glossary_payload(store, lex)
-    for fmt in FORMATS:
-        assert render("glossary", res, fmt).strip()

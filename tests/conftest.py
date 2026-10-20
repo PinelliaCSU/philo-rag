@@ -2,23 +2,16 @@
 
 生成后端统一钉成离线 `template`：用例一旦落到 `api` 后端就要连外部服务与网络。
 需要真正走 api 分支的用例，自己在用例里 monkeypatch 后端函数（见 test_answer_pipeline）。
-
-`scripts/` 下放的是给人看的巡检脚本（用法见 docs/使用说明.md），这里把它们的判定
-收敛成断言：用例直接复用脚本里的用例表，避免同一份期望值维护两遍。
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-from philo_rag.cli import get_lexicon, load_config, open_store
+from philo_rag.config import get_lexicon, load_config, open_store
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
 
 
 @pytest.fixture(scope="session")

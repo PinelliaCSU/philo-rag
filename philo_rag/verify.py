@@ -25,7 +25,7 @@ from typing import Any, Iterable
 
 DEFAULT_CORPUS = "data/哲学大纲_规范化_全集.txt"
 
-# ---- 阈值参数表（全部可被 scripts/check_grounded.py 覆盖）--------------------
+# ---- 阈值参数表 ------------------------------------------------------------
 #   ngram_n=4              中文 4-gram 起步（建议值；低于 3 噪声大，高于 5 过严）
 #   grounded_cover=0.80    单句归一化后 ≥80% 字符落在语料同一连续片段 → grounded
 #   grounded_min_chars=10  该连续片段至少 10 个有效字符，避免短句误判

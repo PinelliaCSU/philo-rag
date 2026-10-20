@@ -199,7 +199,7 @@ def api_answer_stream(prompt: str, cfg: dict[str, Any], strategy: str = "point")
 def generate_text(prompt: str, cfg: dict[str, Any], strategy: str = "point") -> str:
     """按配置选择后端，把提示词送出去拿回文本。
 
-    供连通性探测（`demo` / `scripts/check_api.py`）复用，避免各处重复判断后端。
+    统一按配置选择后端，避免各处重复判断。
     """
     backend = str(cfg.get("answer", {}).get("backend", "template"))
     if backend == "ollama":

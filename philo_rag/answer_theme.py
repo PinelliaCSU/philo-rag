@@ -252,7 +252,7 @@ def theme_answer(
 
     这是 `answer()` 在判定为「范围查询」时调用的内部分支，返回结构与点查询一致
     （answer + citations），另带 `theme` 字段给出聚合概览（锚点、单元分布、谱系）。
-    也可以直接用 `ask --strategy theme` 显式触发。
+    也可以在网页端把提问方式显式切换为「范围查询」。
     """
     from .theme import theme_search
 
